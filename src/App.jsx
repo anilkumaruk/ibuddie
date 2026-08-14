@@ -6,7 +6,7 @@ import {
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
   BookMarked, Timer, CheckCircle2, XCircle, RotateCcw,
-  Volume2, VolumeX,
+  Volume2, VolumeX, Loader2,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "./Login.jsx";
@@ -72,7 +72,8 @@ export default function App({ user, onLogout }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceLang, setVoiceLang] = useState("en-IN"); // "en-IN" | "kn-IN" — language for voice input
-  const [speakingIndex, setSpeakingIndex] = useState(null); // index of the assistant message currently being read aloud
+  const [speakingIndex, setSpeakingIndex] = useState(null); // index of the assistant message currently reading aloud (loading OR playing)
+  const [loadingIndex, setLoadingIndex] = useState(null); // index of the message whose Sarvam audio is still being generated (before playback actually starts)
   const [attachedImage, setAttachedImage] = useState(null); // { mediaType, data, previewUrl }
   const [conversations, setConversations] = useState(() => {
     try {
@@ -533,6 +534,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
   }
 
   function speakWithBrowserVoice(text, index) {
+    setLoadingIndex(null); // browser voice starts near-instantly, no loading phase to show
     if (!window.speechSynthesis) {
       alert("Voice output isn't supported in this browser. Try Chrome.");
       setSpeakingIndex(null);
@@ -625,18 +627,22 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           URL.revokeObjectURL(url);
           reject(new Error("Playback error"));
         };
-        player.play().catch(reject);
+        player
+          .play()
+          .then(() => setLoadingIndex(null)) // first sound is actually playing now — swap loading spinner for the "Stop" state
+          .catch(reject);
       });
     }
   }
 
   async function speakMessage(text, index) {
-    // Toggle off if this exact message is already speaking
+    // Toggle off if this exact message is already speaking (whether still loading or already playing)
     if (speakingIndex === index) {
       window.speechSynthesis?.cancel();
       audioPlayerRef.current?.pause();
       if (ttsQueueRef.current) ttsQueueRef.current.cancelled = true;
       setSpeakingIndex(null);
+      setLoadingIndex(null);
       return;
     }
     // Stop whatever else was reading (browser voice or a Sarvam clip)
@@ -650,13 +656,15 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
     // Pro users get the natural Sarvam AI voice; free users (and any Sarvam failure) fall back to the free browser voice
     if (isProUser) {
+      setLoadingIndex(index); // show a spinner while the first chunk generates
       try {
         await playSarvamChunks(text, isKannada);
         setSpeakingIndex(null);
+        setLoadingIndex(null);
         return;
       } catch (e) {
         console.error("Sarvam TTS failed, falling back to browser voice:", e);
-        // fall through to browser voice below
+        // fall through to browser voice below (which clears loadingIndex itself)
       }
     }
 
@@ -784,6 +792,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
         ::placeholder { color: #8C7D6B; }
         textarea:focus { outline: none; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @media (max-width: 768px) {
           .ibuddie-main { padding: 12px !important; }
           .ibuddie-subjects { flex-wrap: nowrap !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
@@ -1124,11 +1133,17 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                         </div>
                         <div
                           onClick={() => speakMessage(m.body, i)}
+                          title={loadingIndex === i ? "Generating voice…" : speakingIndex === i ? "Stop" : "Listen to this reply"}
                           style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "4px 6px", borderRadius: 6, cursor: "pointer", color: speakingIndex === i ? "#2F6B4A" : "#8C7D6B", fontSize: 11.5 }}
                         >
-                          {speakingIndex === i ? (
+                          {loadingIndex === i ? (
                             <>
-                              <VolumeX size={13} />
+                              <Loader2 size={13} style={{ animation: "spin 0.8s linear infinite" }} />
+                              <span>Loading…</span>
+                            </>
+                          ) : speakingIndex === i ? (
+                            <>
+                              <VolumeX size={13} style={{ animation: "pulse 1.2s ease-in-out infinite" }} />
                               <span>Stop</span>
                             </>
                           ) : (
