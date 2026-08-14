@@ -105,6 +105,7 @@ export default function App({ user, onLogout }) {
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
+  const audioPlayerRef = useRef(null); // holds the currently-playing Sarvam AI audio, if any
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -530,26 +531,61 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
     setRecording(true);
   }
 
-  function speakMessage(text, index) {
+  function speakWithBrowserVoice(text, index) {
     if (!window.speechSynthesis) {
       alert("Voice output isn't supported in this browser. Try Chrome.");
-      return;
-    }
-    // Toggle off if this exact message is already speaking
-    if (speakingIndex === index) {
-      window.speechSynthesis.cancel();
       setSpeakingIndex(null);
       return;
     }
-    window.speechSynthesis.cancel(); // stop any other message currently reading
-    const isKannada = /[\u0C80-\u0CFF]/.test(text); // detect Kannada script in the reply
+    const isKannada = /[\u0C80-\u0CFF]/.test(text);
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = isKannada ? "kn-IN" : "en-IN";
     utterance.rate = 0.95;
     utterance.onend = () => setSpeakingIndex(null);
     utterance.onerror = () => setSpeakingIndex(null);
-    setSpeakingIndex(index);
     window.speechSynthesis.speak(utterance);
+  }
+
+  async function speakMessage(text, index) {
+    // Toggle off if this exact message is already speaking
+    if (speakingIndex === index) {
+      window.speechSynthesis?.cancel();
+      audioPlayerRef.current?.pause();
+      setSpeakingIndex(null);
+      return;
+    }
+    // Stop whatever else was reading (browser voice or a Sarvam clip)
+    window.speechSynthesis?.cancel();
+    audioPlayerRef.current?.pause();
+
+    const isKannada = /[\u0C80-\u0CFF]/.test(text);
+    const isProUser = MODEL_ORDER.some((key) => subscriptions[key]?.active);
+    setSpeakingIndex(index);
+
+    // Pro users get the natural Sarvam AI voice; free users (and any Sarvam failure) fall back to the free browser voice
+    if (isProUser) {
+      try {
+        const res = await fetch("/api/text-to-speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, languageCode: isKannada ? "kn-IN" : "en-IN" }),
+        });
+        if (!res.ok) throw new Error("Sarvam TTS request failed");
+        const { audio } = await res.json();
+        if (!audio) throw new Error("No audio returned");
+        const player = new Audio(`data:audio/wav;base64,${audio}`);
+        audioPlayerRef.current = player;
+        player.onended = () => setSpeakingIndex(null);
+        player.onerror = () => setSpeakingIndex(null);
+        await player.play();
+        return;
+      } catch (e) {
+        console.error("Sarvam TTS failed, falling back to browser voice:", e);
+        // fall through to browser voice below
+      }
+    }
+
+    speakWithBrowserVoice(text, index);
   }
 
   function loadRazorpayScript() {
