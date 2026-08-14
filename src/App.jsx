@@ -571,12 +571,16 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           body: JSON.stringify({ text, languageCode: isKannada ? "kn-IN" : "en-IN" }),
         });
         if (!res.ok) throw new Error("Sarvam TTS request failed");
-        const { audio } = await res.json();
-        if (!audio) throw new Error("No audio returned");
-        const player = new Audio(`data:audio/wav;base64,${audio}`);
+        const audioBlob = await res.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const player = new Audio(audioUrl);
         audioPlayerRef.current = player;
-        player.onended = () => setSpeakingIndex(null);
-        player.onerror = () => setSpeakingIndex(null);
+        const cleanup = () => {
+          setSpeakingIndex(null);
+          URL.revokeObjectURL(audioUrl);
+        };
+        player.onended = cleanup;
+        player.onerror = cleanup;
         await player.play();
         return;
       } catch (e) {
