@@ -10,6 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "firebase": "^12.17.1",
+    "firebase-admin": "^13.10.0",
+    "lucide-react": "^1.29.0",
+    "razorpay": "^2.9.8",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
