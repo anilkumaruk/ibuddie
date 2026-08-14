@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { PhoneOff } from "lucide-react";
-import { ReactiveFace, AvatarKeyframes, INK, PAPER, ACTIVE_GREEN } from "./AvatarWidget.jsx";
+import { ReactiveFace, AvatarKeyframes, INK, PAPER } from "./AvatarWidget.jsx";
 
 const GREETINGS = {
   "en-IN": "Hey buddy! What can I help you with today?",
@@ -20,7 +20,6 @@ const EXIT_PHRASES = [
 ];
 
 // How long to wait after the student stops talking before treating the turn as complete.
-// Long enough that a normal mid-sentence pause doesn't get cut off.
 const SILENCE_MS = 3500;
 
 function isExitPhrase(text) {
@@ -38,92 +37,18 @@ const STATUS_LABEL = {
   error: "Something went wrong",
 };
 
-// --- TTS chunking helpers (module-level — no component state needed) ---
-
-function splitIntoSentenceChunks(text, maxChunkLen = 220) {
-  const sentences = text.split(/(?<=[.!?।])\s+/).filter(Boolean);
-  const chunks = [];
-  let current = "";
-  for (const sentence of sentences) {
-    const candidate = current ? `${current} ${sentence}` : sentence;
-    if (candidate.length > maxChunkLen && current) {
-      chunks.push(current.trim());
-      current = sentence;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current.trim()) chunks.push(current.trim());
-  return chunks.length ? chunks : [text];
-}
-
-// Cuts the first chunk down to a short opening burst (word-boundary safe) so the very
-// first sound comes back fast — same trick used for the regular Listen button.
-function shortenOpeningChunk(chunks, openingMaxLen = 70) {
-  if (chunks.length === 0 || chunks[0].length <= openingMaxLen) return chunks;
-  const first = chunks[0];
-  let cutIndex = first.lastIndexOf(" ", openingMaxLen);
-  if (cutIndex <= 0) cutIndex = openingMaxLen;
-  const opening = first.slice(0, cutIndex).trim();
-  const rest = first.slice(cutIndex).trim();
-  const result = [...chunks];
-  result.splice(0, 1, opening, rest);
-  return result;
-}
-
-async function fetchSpeechChunk(chunkText, languageCode) {
-  const res = await fetch("/api/text-to-speech", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: chunkText, languageCode }),
-  });
-  if (!res.ok) throw new Error("TTS chunk request failed");
-  return res.blob();
-}
-
-// Plays a queue of (possibly still-in-flight) blob promises back to back, in order.
-async function playBlobsInOrder(blobPromises, stoppedFlagRef, playerRef, ctxRef, analyserNodeRef) {
-  for (let i = 0; i < blobPromises.length; i++) {
-    if (stoppedFlagRef.current) return;
-    const blob = await blobPromises[i];
-    if (stoppedFlagRef.current) return;
-    const url = URL.createObjectURL(blob);
-    await new Promise((resolve, reject) => {
-      const player = new Audio(url);
-      playerRef.current = player;
-      try {
-        const source = ctxRef.current.createMediaElementSource(player);
-        source.connect(analyserNodeRef.current);
-      } catch (e) {
-        console.error("Avatar mouth won't be reactive for this clip:", e);
-      }
-      player.onended = () => {
-        URL.revokeObjectURL(url);
-        resolve();
-      };
-      player.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error("Playback error"));
-      };
-      player.play().catch(reject);
-    });
-  }
-}
-
 export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam, subjectLabel, activeModel }) {
   const [phase, setPhase] = useState("greeting");
   const [lastHeard, setLastHeard] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const phaseRef = useRef("greeting"); // mirrors `phase`, but always current inside async/event callbacks
+  const phaseRef = useRef("greeting");
   const stoppedRef = useRef(false);
   const recognitionRef = useRef(null);
   const silenceTimerRef = useRef(null);
-  const finalTranscriptRef = useRef(""); // accumulates across brief pauses within one turn
-  const deliberateStopRef = useRef(false); // true only when *we* stopped recognition on purpose (silence timeout)
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const audioPlayerRef = useRef(null);
+  const finalTranscriptRef = useRef("");
+  const deliberateStopRef = useRef(false);
+  const currentUtteranceRef = useRef(null);
 
   function updatePhase(next) {
     phaseRef.current = next;
@@ -150,9 +75,6 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     try {
       recognitionRef.current?.stop();
     } catch {}
-    try {
-      audioPlayerRef.current?.pause();
-    } catch {}
     window.speechSynthesis?.cancel();
   }
 
@@ -161,42 +83,37 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     onClose();
   }
 
-  function ensureAnalyser() {
-    if (!audioContextRef.current) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      audioContextRef.current = new AudioCtx();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 256;
-      analyserRef.current.connect(audioContextRef.current.destination);
-    }
-    if (audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume().catch(() => {});
-    }
+  // Speaks a list of sentences back-to-back on the free browser voice, one at a time,
+  // resolving once the last one finishes. No network calls, no cost.
+  function speakSentences(sentences) {
+    return new Promise((resolve) => {
+      if (!window.speechSynthesis || sentences.length === 0) {
+        resolve();
+        return;
+      }
+      let index = 0;
+      function speakNext() {
+        if (stoppedRef.current || index >= sentences.length) {
+          resolve();
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(sentences[index]);
+        utterance.lang = voiceLang;
+        utterance.rate = 0.95;
+        currentUtteranceRef.current = utterance;
+        index++;
+        utterance.onend = speakNext;
+        utterance.onerror = speakNext;
+        window.speechSynthesis.speak(utterance);
+      }
+      speakNext();
+    });
   }
 
-  // Speaks a known, complete piece of text (greeting/closing/error messages) — chunked
-  // for fast time-to-first-sound, same technique as the main Listen button.
   async function speakText(text) {
     if (stoppedRef.current) return;
     updatePhase("speaking");
-    ensureAnalyser();
-    try {
-      const chunks = shortenOpeningChunk(splitIntoSentenceChunks(text));
-      const chunkPromises = chunks.map((c) => fetchSpeechChunk(c, voiceLang));
-      await playBlobsInOrder(chunkPromises, stoppedRef, audioPlayerRef, audioContextRef, analyserRef);
-    } catch (e) {
-      console.error("Sarvam TTS failed in voice call, falling back to browser voice:", e);
-      if (stoppedRef.current) return;
-      await new Promise((resolve) => {
-        if (!window.speechSynthesis) return resolve();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = voiceLang;
-        utterance.rate = 0.95;
-        utterance.onend = resolve;
-        utterance.onerror = resolve;
-        window.speechSynthesis.speak(utterance);
-      });
-    }
+    await speakSentences([text]); // one known, complete string — no need to split it
   }
 
   async function runGreeting() {
@@ -250,7 +167,7 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
       if (stoppedRef.current) return;
       if (event.error === "no-speech") {
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-        startListening(); // nobody said anything at all — just listen again, nothing to preserve
+        startListening();
         return;
       }
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
@@ -269,13 +186,11 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
       const text = finalTranscriptRef.current.trim();
 
       if (!deliberateStopRef.current) {
-        // Ended on its own (browser/OS session limit), not because we detected real
-        // silence — keep whatever was captured and keep listening for the rest.
-        startListening(text);
+        startListening(text); // browser/OS ended it early — keep what we heard and keep going
         return;
       }
       if (!text) {
-        startListening(); // genuine silence — nothing was said
+        startListening();
         return;
       }
       if (isExitPhrase(text)) {
@@ -314,18 +229,17 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
       });
       if (!response.ok || !response.body) throw new Error("Stream failed");
 
-      ensureAnalyser();
-
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       const sentenceEndRegex = /[.!?।]+(\s|$)/;
       let buffer = "";
       let fullText = "";
-      const chunkPromises = [];
+      let spokenAnySentence = false;
+      let speakChain = Promise.resolve();
 
-      // Peel off complete sentences as they stream in and start synthesizing them
-      // immediately — we don't wait for the whole reply to finish generating before
-      // starting to talk back, which is what made this feel slow before.
+      // Peel off complete sentences as they stream in and start speaking them right
+      // away — we don't wait for the whole reply to finish generating first, which is
+      // what made this feel slow before. speakChain keeps them playing strictly in order.
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -338,18 +252,27 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
           const cut = match.index + match[0].length;
           const sentence = buffer.slice(0, cut).trim();
           buffer = buffer.slice(cut);
-          if (sentence) chunkPromises.push(fetchSpeechChunk(sentence, voiceLang));
+          if (sentence) {
+            if (!spokenAnySentence) {
+              spokenAnySentence = true;
+              updatePhase("speaking");
+            }
+            speakChain = speakChain.then(() => (stoppedRef.current ? undefined : speakSentences([sentence])));
+          }
         }
       }
-      if (buffer.trim()) chunkPromises.push(fetchSpeechChunk(buffer.trim(), voiceLang));
+      const trailing = buffer.trim();
+      if (trailing) {
+        if (!spokenAnySentence) updatePhase("speaking");
+        speakChain = speakChain.then(() => (stoppedRef.current ? undefined : speakSentences([trailing])));
+      }
 
       if (stoppedRef.current) return;
 
-      if (chunkPromises.length === 0) {
+      if (!spokenAnySentence && !trailing) {
         await speakText(fullText.trim() || "Sorry, I didn't catch that clearly — could you say it again?");
       } else {
-        updatePhase("speaking");
-        await playBlobsInOrder(chunkPromises, stoppedRef, audioPlayerRef, audioContextRef, analyserRef);
+        await speakChain;
       }
     } catch (e) {
       console.error("Voice call ask failed:", e);
@@ -370,7 +293,7 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
         fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
-      <ReactiveFace size={200} isSpeaking={phase === "speaking"} analyserRef={analyserRef} />
+      <ReactiveFace size={200} isSpeaking={phase === "speaking"} analyserRef={null} />
 
       <div style={{ marginTop: 28, color: PAPER, fontSize: 18, fontWeight: 700 }}>
         {phase === "error" ? errorMsg : STATUS_LABEL[phase]}
@@ -395,7 +318,6 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
       </button>
 
       <AvatarKeyframes />
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
