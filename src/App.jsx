@@ -106,6 +106,7 @@ export default function App({ user, onLogout }) {
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
   const audioPlayerRef = useRef(null); // holds the currently-playing Sarvam AI audio, if any
+  const ttsQueueRef = useRef(null); // { cancelled: bool } — lets us stop a chunked playback queue early
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -546,17 +547,86 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
     window.speechSynthesis.speak(utterance);
   }
 
+  // Splits a reply into small sentence-based chunks (Kannada danda "।" included) so we
+  // can fetch several short Sarvam TTS clips in parallel instead of one long blocking one.
+  function splitIntoSpeechChunks(text, maxChunkLen = 200, maxChunks = 6) {
+    const sentences = text.split(/(?<=[.!?।])\s+/).filter(Boolean);
+    const chunks = [];
+    let current = "";
+    for (const sentence of sentences) {
+      const candidate = current ? `${current} ${sentence}` : sentence;
+      if (candidate.length > maxChunkLen && current) {
+        chunks.push(current.trim());
+        current = sentence;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current.trim()) chunks.push(current.trim());
+    if (chunks.length === 0) return [text];
+    // Cap the number of parallel requests — merge any overflow into the final chunk
+    if (chunks.length > maxChunks) {
+      const head = chunks.slice(0, maxChunks - 1);
+      const tail = chunks.slice(maxChunks - 1).join(" ");
+      return [...head, tail];
+    }
+    return chunks;
+  }
+
+  async function fetchSpeechChunk(chunkText, languageCode) {
+    const res = await fetch("/api/text-to-speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: chunkText, languageCode }),
+    });
+    if (!res.ok) throw new Error("Sarvam TTS chunk request failed");
+    return res.blob();
+  }
+
+  async function playSarvamChunks(text, isKannada) {
+    const languageCode = isKannada ? "kn-IN" : "en-IN";
+    const chunks = splitIntoSpeechChunks(text);
+    const queueState = { cancelled: false };
+    ttsQueueRef.current = queueState;
+
+    // Kick off every chunk's request at once — the first (short) chunk comes back fast,
+    // and later chunks are already generating in the background by the time we reach them.
+    const chunkPromises = chunks.map((chunk) => fetchSpeechChunk(chunk, languageCode));
+
+    for (let i = 0; i < chunkPromises.length; i++) {
+      if (queueState.cancelled) return;
+      const blob = await chunkPromises[i];
+      if (queueState.cancelled) return;
+      const url = URL.createObjectURL(blob);
+      await new Promise((resolve, reject) => {
+        const player = new Audio(url);
+        audioPlayerRef.current = player;
+        player.onended = () => {
+          URL.revokeObjectURL(url);
+          resolve();
+        };
+        player.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("Playback error"));
+        };
+        player.play().catch(reject);
+      });
+    }
+  }
+
   async function speakMessage(text, index) {
     // Toggle off if this exact message is already speaking
     if (speakingIndex === index) {
       window.speechSynthesis?.cancel();
       audioPlayerRef.current?.pause();
+      if (ttsQueueRef.current) ttsQueueRef.current.cancelled = true;
       setSpeakingIndex(null);
       return;
     }
     // Stop whatever else was reading (browser voice or a Sarvam clip)
     window.speechSynthesis?.cancel();
     audioPlayerRef.current?.pause();
+    if (ttsQueueRef.current) ttsQueueRef.current.cancelled = true;
 
     const isKannada = /[\u0C80-\u0CFF]/.test(text);
     const isProUser = MODEL_ORDER.some((key) => subscriptions[key]?.active);
@@ -565,23 +635,8 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
     // Pro users get the natural Sarvam AI voice; free users (and any Sarvam failure) fall back to the free browser voice
     if (isProUser) {
       try {
-        const res = await fetch("/api/text-to-speech", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, languageCode: isKannada ? "kn-IN" : "en-IN" }),
-        });
-        if (!res.ok) throw new Error("Sarvam TTS request failed");
-        const audioBlob = await res.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const player = new Audio(audioUrl);
-        audioPlayerRef.current = player;
-        const cleanup = () => {
-          setSpeakingIndex(null);
-          URL.revokeObjectURL(audioUrl);
-        };
-        player.onended = cleanup;
-        player.onerror = cleanup;
-        await player.play();
+        await playSarvamChunks(text, isKannada);
+        setSpeakingIndex(null);
         return;
       } catch (e) {
         console.error("Sarvam TTS failed, falling back to browser voice:", e);
