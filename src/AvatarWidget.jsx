@@ -1,12 +1,16 @@
 import { useEffect, useRef } from "react";
 
-// Matches the app's existing ink/paper palette (see ACCENT in App.jsx) so this
+// Matches the app's existing ink/paper palette (see ACCENT/GREEN in App.jsx) so this
 // looks like part of the product, not a bolted-on mascot.
-const INK = "#17140F";
-const PAPER = "#F2EFE7";
-const ACTIVE_GREEN = "#2F6B4A";
+export const INK = "#17140F";
+export const PAPER = "#F2EFE7";
+export const ACTIVE_GREEN = "#2F6B4A";
 
-export default function AvatarWidget({ isSpeaking, isLoading, analyserRef }) {
+// A reusable animated face: blinking eyes + a mouth that reacts to real audio volume
+// (via analyserRef) when available, or falls back to a generic talking loop when not
+// (e.g. free-tier browser voice, which has no accessible waveform). Used by both the
+// small per-message "Listen" bubble and the full-screen voice call mode.
+export function ReactiveFace({ size = 40, isSpeaking, analyserRef }) {
   const mouthRef = useRef(null);
   const rafRef = useRef(null);
 
@@ -22,7 +26,6 @@ export default function AvatarWidget({ isSpeaking, isLoading, analyserRef }) {
     function tick() {
       if (mouthRef.current) {
         if (analyser && dataArray) {
-          // Real Sarvam AI audio: read actual volume and open the mouth proportionally.
           analyser.getByteFrequencyData(dataArray);
           let sum = 0;
           const range = Math.floor(dataArray.length / 2); // voice energy concentrates in the lower half of the spectrum
@@ -31,8 +34,6 @@ export default function AvatarWidget({ isSpeaking, isLoading, analyserRef }) {
           const openness = 0.15 + Math.min(avg * 1.8, 1) * 0.85;
           mouthRef.current.style.transform = `scaleY(${openness.toFixed(2)})`;
         } else {
-          // Free-tier browser voice: no waveform access available, so use a gentle
-          // looping "talk" motion instead — still reads as alive, just not reactive.
           const t = Date.now() / 140;
           const openness = 0.25 + Math.abs(Math.sin(t)) * 0.6;
           mouthRef.current.style.transform = `scaleY(${openness.toFixed(2)})`;
@@ -47,6 +48,46 @@ export default function AvatarWidget({ isSpeaking, isLoading, analyserRef }) {
     };
   }, [isSpeaking, analyserRef]);
 
+  const eyeCx1 = size * 0.325;
+  const eyeCx2 = size * 0.675;
+  const eyeCy = size * 0.375;
+  const eyeRx = size * 0.065;
+  const eyeRy = size * 0.085;
+  const mouthCx = size * 0.5;
+  const mouthCy = size * 0.65;
+  const mouthRx = size * 0.175;
+  const mouthRy = size * 0.1;
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <ellipse cx={eyeCx1} cy={eyeCy} rx={eyeRx} ry={eyeRy} fill={PAPER} style={{ transformBox: "fill-box", transformOrigin: "center", animation: "avatarBlink 4.5s ease-in-out infinite" }} />
+      <ellipse cx={eyeCx2} cy={eyeCy} rx={eyeRx} ry={eyeRy} fill={PAPER} style={{ transformBox: "fill-box", transformOrigin: "center", animation: "avatarBlink 4.5s ease-in-out infinite" }} />
+      <ellipse
+        ref={mouthRef}
+        cx={mouthCx}
+        cy={mouthCy}
+        rx={mouthRx}
+        ry={mouthRy}
+        fill={PAPER}
+        style={{ transformBox: "fill-box", transformOrigin: "center", transform: "scaleY(0.15)" }}
+      />
+    </svg>
+  );
+}
+
+// Shared keyframes both the bubble and the full-screen modal rely on.
+export function AvatarKeyframes() {
+  return (
+    <style>{`
+      @keyframes avatarFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes avatarBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+      @keyframes avatarBlink { 0%, 92%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
+    `}</style>
+  );
+}
+
+// The small floating bubble shown next to a per-message "Listen" click — unchanged behavior.
+export default function AvatarWidget({ isSpeaking, isLoading, analyserRef }) {
   if (!isSpeaking && !isLoading) return null;
 
   return (
@@ -79,19 +120,7 @@ export default function AvatarWidget({ isSpeaking, isLoading, analyserRef }) {
           transition: "box-shadow 0.3s ease",
         }}
       >
-        <svg width="40" height="40" viewBox="0 0 40 40">
-          <ellipse cx="13" cy="15" rx="2.6" ry="3.4" fill={PAPER} style={{ transformBox: "fill-box", transformOrigin: "center", animation: "avatarBlink 4.5s ease-in-out infinite" }} />
-          <ellipse cx="27" cy="15" rx="2.6" ry="3.4" fill={PAPER} style={{ transformBox: "fill-box", transformOrigin: "center", animation: "avatarBlink 4.5s ease-in-out infinite" }} />
-          <ellipse
-            ref={mouthRef}
-            cx="20"
-            cy="26"
-            rx="7"
-            ry="4"
-            fill={PAPER}
-            style={{ transformBox: "fill-box", transformOrigin: "center", transform: "scaleY(0.15)" }}
-          />
-        </svg>
+        <ReactiveFace size={40} isSpeaking={isSpeaking && !isLoading} analyserRef={analyserRef} />
         {isLoading && (
           <div
             style={{
@@ -108,11 +137,7 @@ export default function AvatarWidget({ isSpeaking, isLoading, analyserRef }) {
       <div style={{ fontSize: 11, fontWeight: 700, color: INK, background: PAPER, padding: "3px 10px", borderRadius: 999, border: "1px solid #E4E2DA" }}>
         {isLoading ? "Thinking…" : "iBuddie"}
       </div>
-      <style>{`
-        @keyframes avatarFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes avatarBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-        @keyframes avatarBlink { 0%, 92%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
-      `}</style>
+      <AvatarKeyframes />
     </div>
   );
 }

@@ -6,11 +6,12 @@ import {
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
   BookMarked, Timer, CheckCircle2, XCircle, RotateCcw,
-  Volume2, VolumeX, Loader2,
+  Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "./Login.jsx";
 import AvatarWidget from "./AvatarWidget.jsx";
+import VoiceCallModal from "./VoiceCallModal.jsx";
 
 const MODELS = {
   // gemini: { id: "gemini", label: "Gemini", freeLimit: 20, period: "day", upgradable: false }, // paused — re-add to MODEL_ORDER when ready
@@ -35,6 +36,7 @@ const NAV_ITEMS = [
   { key: "doubt", label: "Doubt Desk", icon: ClipboardCheck },
   { key: "mocktest", label: "Daily Mock Test", icon: Calendar },
   { key: "topics", label: "Important Topics", icon: BookMarked },
+  { key: "voicecall", label: "Talk to iBuddie", icon: Phone },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -71,6 +73,7 @@ export default function App({ user, onLogout }) {
   const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 768 : false));
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [voiceCallOpen, setVoiceCallOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceLang, setVoiceLang] = useState("en-IN"); // "en-IN" | "kn-IN" — language for voice input
   const [speakingIndex, setSpeakingIndex] = useState(null); // index of the assistant message currently reading aloud (loading OR playing)
@@ -874,7 +877,18 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               title={item.label}
               onClick={() => {
                 if (item.key === "settings") setSettingsOpen(true);
-                else { setView(item.key); if (isMobile) setSidebarOpen(false); }
+                else if (item.key === "voicecall") {
+                  const isProUser = MODEL_ORDER.some((key) => subscriptions[key]?.active);
+                  if (isProUser) setVoiceCallOpen(true);
+                  else {
+                    setUpgradeModel(selectedModel);
+                    setUpgradeOpen(true);
+                  }
+                  if (isMobile) setSidebarOpen(false);
+                } else {
+                  setView(item.key);
+                  if (isMobile) setSidebarOpen(false);
+                }
               }}
               style={{
                 display: "flex", alignItems: "center", gap: 11,
@@ -1610,6 +1624,15 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
         isSpeaking={speakingIndex !== null}
         isLoading={loadingIndex !== null}
         analyserRef={analyserRef}
+      />
+      <VoiceCallModal
+        open={voiceCallOpen}
+        onClose={() => setVoiceCallOpen(false)}
+        voiceLang={voiceLang}
+        subject={subject}
+        exam={exam}
+        subjectLabel={currentSubject.label}
+        activeModel={MODEL_ORDER.find((key) => subscriptions[key]?.active) || selectedModel}
       />
     </div>
   );
