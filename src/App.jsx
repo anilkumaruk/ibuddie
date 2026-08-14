@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "./Login.jsx";
+import AvatarWidget from "./AvatarWidget.jsx";
 
 const MODELS = {
   // gemini: { id: "gemini", label: "Gemini", freeLimit: 20, period: "day", upgradable: false }, // paused — re-add to MODEL_ORDER when ready
@@ -108,6 +109,8 @@ export default function App({ user, onLogout }) {
   const recognitionRef = useRef(null);
   const audioPlayerRef = useRef(null); // holds the currently-playing Sarvam AI audio, if any
   const ttsQueueRef = useRef(null); // { cancelled: bool } — lets us stop a chunked playback queue early
+  const audioContextRef = useRef(null); // shared Web Audio context, created lazily on first Listen click
+  const analyserRef = useRef(null); // AnalyserNode the avatar reads to animate its mouth to actual voice volume
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -601,11 +604,25 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
     return res.blob();
   }
 
+  function ensureAnalyser() {
+    if (!audioContextRef.current) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      audioContextRef.current = new AudioCtx();
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256;
+      analyserRef.current.connect(audioContextRef.current.destination);
+    }
+    if (audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume().catch(() => {});
+    }
+  }
+
   async function playSarvamChunks(text, isKannada) {
     const languageCode = isKannada ? "kn-IN" : "en-IN";
     const chunks = splitIntoSpeechChunks(text);
     const queueState = { cancelled: false };
     ttsQueueRef.current = queueState;
+    ensureAnalyser(); // set up (or resume) the audio graph the avatar's mouth animation reads from
 
     // Kick off every chunk's request at once — the first (short) chunk comes back fast,
     // and later chunks are already generating in the background by the time we reach them.
@@ -619,6 +636,12 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
       await new Promise((resolve, reject) => {
         const player = new Audio(url);
         audioPlayerRef.current = player;
+        try {
+          const source = audioContextRef.current.createMediaElementSource(player);
+          source.connect(analyserRef.current);
+        } catch (e) {
+          console.error("Could not connect audio analyser (avatar mouth won't be reactive for this clip):", e);
+        }
         player.onended = () => {
           URL.revokeObjectURL(url);
           resolve();
@@ -1583,6 +1606,11 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           )}
         </div>
       </div>
+      <AvatarWidget
+        isSpeaking={speakingIndex !== null}
+        isLoading={loadingIndex !== null}
+        analyserRef={analyserRef}
+      />
     </div>
   );
 }
