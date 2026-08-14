@@ -549,7 +549,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
   // Splits a reply into small sentence-based chunks (Kannada danda "।" included) so we
   // can fetch several short Sarvam TTS clips in parallel instead of one long blocking one.
-  function splitIntoSpeechChunks(text, maxChunkLen = 200, maxChunks = 6) {
+  function splitIntoSpeechChunks(text, maxChunkLen = 220, maxChunks = 6) {
     const sentences = text.split(/(?<=[.!?।])\s+/).filter(Boolean);
     const chunks = [];
     let current = "";
@@ -565,12 +565,28 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
     if (current.trim()) chunks.push(current.trim());
     if (chunks.length === 0) return [text];
     // Cap the number of parallel requests — merge any overflow into the final chunk
+    let result = chunks;
     if (chunks.length > maxChunks) {
       const head = chunks.slice(0, maxChunks - 1);
       const tail = chunks.slice(maxChunks - 1).join(" ");
-      return [...head, tail];
+      result = [...head, tail];
     }
-    return chunks;
+    return shortenOpeningChunk(result, 70);
+  }
+
+  // Splits an oversized first chunk at the nearest word boundary so the very first
+  // burst of audio is tiny (~70 chars) — this is what actually drops time-to-first-sound,
+  // since synthesis + transfer time scales with how much text is in that first request.
+  function shortenOpeningChunk(chunks, openingMaxLen) {
+    if (chunks.length === 0 || chunks[0].length <= openingMaxLen) return chunks;
+    const first = chunks[0];
+    let cutIndex = first.lastIndexOf(" ", openingMaxLen);
+    if (cutIndex <= 0) cutIndex = openingMaxLen; // no space found — hard cut as a fallback
+    const opening = first.slice(0, cutIndex).trim();
+    const rest = first.slice(cutIndex).trim();
+    const result = [...chunks];
+    result.splice(0, 1, opening, rest);
+    return result;
   }
 
   async function fetchSpeechChunk(chunkText, languageCode) {
