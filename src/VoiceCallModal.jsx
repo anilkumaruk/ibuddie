@@ -19,6 +19,10 @@ const EXIT_PHRASES = [
   "ಧನ್ಯವಾದ", "ವಂದನೆ", "ಸಾಕು", "ಬೈ",
 ];
 
+// How long to wait after the student stops talking before treating the turn as complete.
+// Long enough that a normal mid-sentence pause doesn't get cut off.
+const SILENCE_MS = 3500;
+
 function isExitPhrase(text) {
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
   if (wordCount === 0 || wordCount > 6) return false;
@@ -34,14 +38,89 @@ const STATUS_LABEL = {
   error: "Something went wrong",
 };
 
+// --- TTS chunking helpers (module-level — no component state needed) ---
+
+function splitIntoSentenceChunks(text, maxChunkLen = 220) {
+  const sentences = text.split(/(?<=[.!?।])\s+/).filter(Boolean);
+  const chunks = [];
+  let current = "";
+  for (const sentence of sentences) {
+    const candidate = current ? `${current} ${sentence}` : sentence;
+    if (candidate.length > maxChunkLen && current) {
+      chunks.push(current.trim());
+      current = sentence;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.length ? chunks : [text];
+}
+
+// Cuts the first chunk down to a short opening burst (word-boundary safe) so the very
+// first sound comes back fast — same trick used for the regular Listen button.
+function shortenOpeningChunk(chunks, openingMaxLen = 70) {
+  if (chunks.length === 0 || chunks[0].length <= openingMaxLen) return chunks;
+  const first = chunks[0];
+  let cutIndex = first.lastIndexOf(" ", openingMaxLen);
+  if (cutIndex <= 0) cutIndex = openingMaxLen;
+  const opening = first.slice(0, cutIndex).trim();
+  const rest = first.slice(cutIndex).trim();
+  const result = [...chunks];
+  result.splice(0, 1, opening, rest);
+  return result;
+}
+
+async function fetchSpeechChunk(chunkText, languageCode) {
+  const res = await fetch("/api/text-to-speech", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: chunkText, languageCode }),
+  });
+  if (!res.ok) throw new Error("TTS chunk request failed");
+  return res.blob();
+}
+
+// Plays a queue of (possibly still-in-flight) blob promises back to back, in order.
+async function playBlobsInOrder(blobPromises, stoppedFlagRef, playerRef, ctxRef, analyserNodeRef) {
+  for (let i = 0; i < blobPromises.length; i++) {
+    if (stoppedFlagRef.current) return;
+    const blob = await blobPromises[i];
+    if (stoppedFlagRef.current) return;
+    const url = URL.createObjectURL(blob);
+    await new Promise((resolve, reject) => {
+      const player = new Audio(url);
+      playerRef.current = player;
+      try {
+        const source = ctxRef.current.createMediaElementSource(player);
+        source.connect(analyserNodeRef.current);
+      } catch (e) {
+        console.error("Avatar mouth won't be reactive for this clip:", e);
+      }
+      player.onended = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      player.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Playback error"));
+      };
+      player.play().catch(reject);
+    });
+  }
+}
+
 export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam, subjectLabel, activeModel }) {
   const [phase, setPhase] = useState("greeting");
   const [lastHeard, setLastHeard] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const phaseRef = useRef("greeting"); // mirrors `phase`, but always current inside async/event callbacks (avoids stale closures)
+  const phaseRef = useRef("greeting"); // mirrors `phase`, but always current inside async/event callbacks
   const stoppedRef = useRef(false);
   const recognitionRef = useRef(null);
+  const silenceTimerRef = useRef(null);
+  const finalTranscriptRef = useRef(""); // accumulates across brief pauses within one turn
+  const deliberateStopRef = useRef(false); // true only when *we* stopped recognition on purpose (silence timeout)
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const audioPlayerRef = useRef(null);
@@ -67,6 +146,7 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
 
   function hardStop() {
     stoppedRef.current = true;
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     try {
       recognitionRef.current?.stop();
     } catch {}
@@ -94,41 +174,16 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     }
   }
 
-  // Speaks a line of text via Sarvam AI (falls back to the browser voice if that fails)
-  // and resolves once playback has fully finished.
+  // Speaks a known, complete piece of text (greeting/closing/error messages) — chunked
+  // for fast time-to-first-sound, same technique as the main Listen button.
   async function speakText(text) {
     if (stoppedRef.current) return;
     updatePhase("speaking");
     ensureAnalyser();
     try {
-      const res = await fetch("/api/text-to-speech", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, languageCode: voiceLang }),
-      });
-      if (!res.ok) throw new Error("TTS request failed");
-      const blob = await res.blob();
-      if (stoppedRef.current) return;
-      const url = URL.createObjectURL(blob);
-      await new Promise((resolve, reject) => {
-        const player = new Audio(url);
-        audioPlayerRef.current = player;
-        try {
-          const source = audioContextRef.current.createMediaElementSource(player);
-          source.connect(analyserRef.current);
-        } catch (e) {
-          console.error("Avatar mouth won't be reactive for this clip:", e);
-        }
-        player.onended = () => {
-          URL.revokeObjectURL(url);
-          resolve();
-        };
-        player.onerror = () => {
-          URL.revokeObjectURL(url);
-          reject(new Error("Playback error"));
-        };
-        player.play().catch(reject);
-      });
+      const chunks = shortenOpeningChunk(splitIntoSentenceChunks(text));
+      const chunkPromises = chunks.map((c) => fetchSpeechChunk(c, voiceLang));
+      await playBlobsInOrder(chunkPromises, stoppedRef, audioPlayerRef, audioContextRef, analyserRef);
     } catch (e) {
       console.error("Sarvam TTS failed in voice call, falling back to browser voice:", e);
       if (stoppedRef.current) return;
@@ -149,7 +204,9 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     if (!stoppedRef.current) startListening();
   }
 
-  function startListening() {
+  // carryOverText: preserves anything already captured if the recognition engine
+  // restarts on its own mid-turn (browser/OS session limits), instead of losing it.
+  function startListening(carryOverText = "") {
     if (stoppedRef.current) return;
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
@@ -157,30 +214,43 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
       updatePhase("error");
       return;
     }
-    setLastHeard("");
+    setLastHeard(carryOverText);
     updatePhase("listening");
+    finalTranscriptRef.current = carryOverText ? carryOverText + " " : "";
+    deliberateStopRef.current = false;
 
     const recognition = new SpeechRecognitionCtor();
     recognition.lang = voiceLang;
-    recognition.interimResults = false;
+    recognition.continuous = true; // don't auto-end after one phrase — keep listening across brief pauses
+    recognition.interimResults = true; // needed so we can detect "still talking" ourselves
     recognition.maxAlternatives = 1;
 
+    function resetSilenceTimer() {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        deliberateStopRef.current = true;
+        try {
+          recognition.stop();
+        } catch {}
+      }, SILENCE_MS);
+    }
+
     recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setLastHeard(transcript);
-      if (isExitPhrase(transcript)) {
-        speakText(CLOSINGS[voiceLang] || CLOSINGS["en-IN"]).then(() => {
-          if (!stoppedRef.current) handleEndCall();
-        });
-        return;
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const piece = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalTranscriptRef.current += piece + " ";
+        else interim += piece;
       }
-      askAndRespond(transcript);
+      setLastHeard((finalTranscriptRef.current + interim).trim());
+      resetSilenceTimer(); // any activity — even mid-word — pushes the "are they done" deadline out
     };
+
     recognition.onerror = (event) => {
       if (stoppedRef.current) return;
       if (event.error === "no-speech") {
-        // Just silence — keep the conversation going instead of ending the call.
-        startListening();
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        startListening(); // nobody said anything at all — just listen again, nothing to preserve
         return;
       }
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
@@ -188,18 +258,37 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
         updatePhase("error");
         return;
       }
-      // Any other transient error — try listening again rather than dying silently.
       if (!stoppedRef.current) startListening();
     };
+
     recognition.onend = () => {
-      // If nothing else has already moved us on (result/error), and we're still meant
-      // to be listening, restart — covers browsers that end the session without a result.
-      if (!stoppedRef.current && phaseRef.current === "listening" && recognitionRef.current === recognition) {
-        startListening();
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (stoppedRef.current) return;
+      if (recognitionRef.current !== recognition) return; // a newer session already took over
+
+      const text = finalTranscriptRef.current.trim();
+
+      if (!deliberateStopRef.current) {
+        // Ended on its own (browser/OS session limit), not because we detected real
+        // silence — keep whatever was captured and keep listening for the rest.
+        startListening(text);
+        return;
       }
+      if (!text) {
+        startListening(); // genuine silence — nothing was said
+        return;
+      }
+      if (isExitPhrase(text)) {
+        speakText(CLOSINGS[voiceLang] || CLOSINGS["en-IN"]).then(() => {
+          if (!stoppedRef.current) handleEndCall();
+        });
+        return;
+      }
+      askAndRespond(text);
     };
 
     recognitionRef.current = recognition;
+    resetSilenceTimer();
     try {
       recognition.start();
     } catch (e) {
@@ -224,16 +313,44 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
         body: JSON.stringify({ question, systemPrompt, model: activeModel }),
       });
       if (!response.ok || !response.body) throw new Error("Stream failed");
+
+      ensureAnalyser();
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      const sentenceEndRegex = /[.!?।]+(\s|$)/;
+      let buffer = "";
       let fullText = "";
+      const chunkPromises = [];
+
+      // Peel off complete sentences as they stream in and start synthesizing them
+      // immediately — we don't wait for the whole reply to finish generating before
+      // starting to talk back, which is what made this feel slow before.
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        fullText += decoder.decode(value, { stream: true });
+        const piece = decoder.decode(value, { stream: true });
+        fullText += piece;
+        buffer += piece;
+
+        let match;
+        while ((match = sentenceEndRegex.exec(buffer))) {
+          const cut = match.index + match[0].length;
+          const sentence = buffer.slice(0, cut).trim();
+          buffer = buffer.slice(cut);
+          if (sentence) chunkPromises.push(fetchSpeechChunk(sentence, voiceLang));
+        }
       }
+      if (buffer.trim()) chunkPromises.push(fetchSpeechChunk(buffer.trim(), voiceLang));
+
       if (stoppedRef.current) return;
-      await speakText(fullText.trim() || "Sorry, I didn't catch that clearly — could you say it again?");
+
+      if (chunkPromises.length === 0) {
+        await speakText(fullText.trim() || "Sorry, I didn't catch that clearly — could you say it again?");
+      } else {
+        updatePhase("speaking");
+        await playBlobsInOrder(chunkPromises, stoppedRef, audioPlayerRef, audioContextRef, analyserRef);
+      }
     } catch (e) {
       console.error("Voice call ask failed:", e);
       if (stoppedRef.current) return;
