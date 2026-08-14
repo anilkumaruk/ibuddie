@@ -6,6 +6,7 @@ import {
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
   BookMarked, Timer, CheckCircle2, XCircle, RotateCcw,
+  Volume2, VolumeX,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "./Login.jsx";
@@ -70,6 +71,8 @@ export default function App({ user, onLogout }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [voiceLang, setVoiceLang] = useState("en-IN"); // "en-IN" | "kn-IN" — language for voice input
+  const [speakingIndex, setSpeakingIndex] = useState(null); // index of the assistant message currently being read aloud
   const [attachedImage, setAttachedImage] = useState(null); // { mediaType, data, previewUrl }
   const [conversations, setConversations] = useState(() => {
     try {
@@ -429,15 +432,16 @@ export default function App({ user, onLogout }) {
     const isGeneral = subject === "general";
     const conciseInstruction = "Keep the explanation focused and concise — 150-250 words unless the question genuinely needs a longer worked example or derivation.";
     const codeInstruction = "If the answer includes code, wrap ONLY the code in a fenced block using triple backticks with the language name right after the opening backticks, e.g. ```python\\ncode here\\n```. Never use any other markdown symbols like ** or # anywhere.";
+    const toneInstruction = "Speak like a warm, encouraging friend and guide — patient and human, never robotic or overly formal. It's fine to sound like a supportive senior/tutor, not a textbook. If the student's question is written or spoken in Kannada, reply in natural Kannada, mixing in English technical terms the way students actually speak (Kanglish) — otherwise reply in English.";
     const systemPrompt = isGeneral
       ? `You are iBuddie's AI Mentor in General mode — a clear, well-researched assistant anyone can use for any question, not limited to exam prep.
-Answer accurately and helpfully, structured with short paragraphs or numbered steps where useful. ${codeInstruction} ${conciseInstruction}
+Answer accurately and helpfully, structured with short paragraphs or numbered steps where useful. ${codeInstruction} ${conciseInstruction} ${toneInstruction}
 Format your response EXACTLY as:
 TOPIC: <short topic name for what this question is about>
 DIFFICULTY: <Basic, Intermediate, or Advanced>
 <then a blank line, then your full answer.>`
       : `You are iBuddie's AI Mentor, an expert ${currentSubject.label} tutor for Indian Class 11-12 students preparing for ${exam}. 
-Answer the student's doubt clearly and step by step, matched to the ${exam} syllabus and difficulty level. ${codeInstruction} ${conciseInstruction}
+Answer the student's doubt clearly and step by step, matched to the ${exam} syllabus and difficulty level. ${codeInstruction} ${conciseInstruction} ${toneInstruction}
 Format your response EXACTLY as:
 TOPIC: <short topic name, e.g. "Optics — Refraction at Curved Surfaces">
 DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
@@ -512,7 +516,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
       return;
     }
     const recognition = new SpeechRecognitionCtor();
-    recognition.lang = "en-IN";
+    recognition.lang = voiceLang;
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
     recognition.onresult = (event) => {
@@ -524,6 +528,28 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
     recognitionRef.current = recognition;
     recognition.start();
     setRecording(true);
+  }
+
+  function speakMessage(text, index) {
+    if (!window.speechSynthesis) {
+      alert("Voice output isn't supported in this browser. Try Chrome.");
+      return;
+    }
+    // Toggle off if this exact message is already speaking
+    if (speakingIndex === index) {
+      window.speechSynthesis.cancel();
+      setSpeakingIndex(null);
+      return;
+    }
+    window.speechSynthesis.cancel(); // stop any other message currently reading
+    const isKannada = /[\u0C80-\u0CFF]/.test(text); // detect Kannada script in the reply
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = isKannada ? "kn-IN" : "en-IN";
+    utterance.rate = 0.95;
+    utterance.onend = () => setSpeakingIndex(null);
+    utterance.onerror = () => setSpeakingIndex(null);
+    setSpeakingIndex(index);
+    window.speechSynthesis.speak(utterance);
   }
 
   function loadRazorpayScript() {
@@ -968,21 +994,39 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                           )
                         )
                       )}
-                      <div
-                        onClick={() => copyToClipboard(m.body, i)}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "4px 6px", borderRadius: 6, cursor: "pointer", color: "#8C7D6B", fontSize: 11.5 }}
-                      >
-                        {copiedIndex === i ? (
-                          <>
-                            <Check size={13} />
-                            <span>Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy size={13} />
-                            <span>Copy</span>
-                          </>
-                        )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <div
+                          onClick={() => copyToClipboard(m.body, i)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "4px 6px", borderRadius: 6, cursor: "pointer", color: "#8C7D6B", fontSize: 11.5 }}
+                        >
+                          {copiedIndex === i ? (
+                            <>
+                              <Check size={13} />
+                              <span>Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={13} />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </div>
+                        <div
+                          onClick={() => speakMessage(m.body, i)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "4px 6px", borderRadius: 6, cursor: "pointer", color: speakingIndex === i ? "#2F6B4A" : "#8C7D6B", fontSize: 11.5 }}
+                        >
+                          {speakingIndex === i ? (
+                            <>
+                              <VolumeX size={13} />
+                              <span>Stop</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 size={13} />
+                              <span>Listen</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )
@@ -1077,11 +1121,22 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    onClick={() => setVoiceLang((prev) => (prev === "en-IN" ? "kn-IN" : "en-IN"))}
+                    title="Voice input language"
+                    style={{
+                      fontSize: 10.5, fontWeight: 700, color: "#8C7D6B", cursor: "pointer",
+                      border: "1px solid #E4E2DA", borderRadius: 999, padding: "3px 8px", userSelect: "none",
+                    }}
+                  >
+                    {voiceLang === "en-IN" ? "EN" : "ಕನ್ನಡ"}
+                  </div>
                   <Mic
                     size={18}
                     color={recording ? "#B23B3B" : "#8C7D6B"}
                     style={{ cursor: "pointer", animation: recording ? "pulse 1s infinite" : "none" }}
                     onClick={toggleVoiceInput}
+                    title={`Voice input (${voiceLang === "en-IN" ? "English" : "Kannada"})`}
                   />
                   <button
                     onClick={sendMessage}
