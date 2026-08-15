@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PhoneOff } from "lucide-react";
-import { ReactiveFace, AvatarKeyframes, INK, PAPER } from "./AvatarWidget.jsx";
+import { AvatarKeyframes, INK, PAPER } from "./AvatarWidget.jsx";
+import WalkingMascot from "./WalkingMascot.jsx";
 
 const GREETINGS = {
   "en-IN": "Hey buddy! What can I help you with today?",
@@ -372,7 +373,7 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
         fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
-      <ReactiveFace size={200} isSpeaking={phase === "speaking"} analyserRef={analyserRef} />
+      <WalkingMascot size={200} isSpeaking={phase === "speaking"} analyserRef={analyserRef} />
 
       <div style={{ marginTop: 28, color: PAPER, fontSize: 18, fontWeight: 700 }}>
         {phase === "error" ? errorMsg : STATUS_LABEL[phase]}
