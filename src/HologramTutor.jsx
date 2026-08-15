@@ -63,13 +63,13 @@ export default function HologramTutor({ isSpeaking, analyserRef, imageSrc = "/tu
   }, [isSpeaking, analyserRef]);
 
   return (
-    <div style={{ position: "relative", width: size, display: "flex", justifyContent: "center", animation: "hologramBreathe 3s ease-in-out infinite" }}>
+    <div style={{ position: "relative", width: "100%", maxWidth: size, margin: "0 auto", display: "flex", justifyContent: "center", animation: "hologramBreathe 3s ease-in-out infinite" }}>
       <img
         ref={imgRef}
         src={imageSrc}
         alt="AI tutor"
         style={{
-          width: size,
+          width: "100%",
           height: "auto",
           display: "block",
           filter: "brightness(1) drop-shadow(0 0 18px rgba(80,180,255,0.3))",
