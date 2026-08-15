@@ -63,13 +63,13 @@ export default function HologramTutor({ isSpeaking, analyserRef, imageSrc = "/tu
   }, [isSpeaking, analyserRef]);
 
   return (
-    <div style={{ position: "relative", width: "100%", maxWidth: size, margin: "0 auto", display: "flex", justifyContent: "center", animation: "hologramBreathe 3s ease-in-out infinite" }}>
+    <div style={{ position: "relative", width: size, display: "flex", justifyContent: "center", animation: "hologramBreathe 3s ease-in-out infinite" }}>
       <img
         ref={imgRef}
         src={imageSrc}
         alt="AI tutor"
         style={{
-          width: "100%",
+          width: size,
           height: "auto",
           display: "block",
           filter: "brightness(1) drop-shadow(0 0 18px rgba(80,180,255,0.3))",
@@ -104,10 +104,10 @@ export default function HologramTutor({ isSpeaking, analyserRef, imageSrc = "/tu
         ref={mouthGapRef}
         style={{
           position: "absolute",
-          left: "49%",
-          top: "63.5%",
+          left: "51%",
+          top: "63%",
           width: "16%",
-          height: "3%",
+          height: "4%",
           transform: "translate(-50%, -50%) scaleY(0.1)",
           borderRadius: "50%",
           background: "radial-gradient(ellipse, rgba(2,4,8,0.95) 0%, rgba(2,4,8,0.85) 45%, rgba(2,4,8,0) 85%)",
