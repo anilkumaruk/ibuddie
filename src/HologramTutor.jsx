@@ -106,7 +106,7 @@ export default function HologramTutor({ isSpeaking, analyserRef, imageSrc = "/tu
           position: "absolute",
           left: "49%",
           top: "63.5%",
-          width: "10%",
+          width: "20%",
           height: "4%",
           transform: "translate(-50%, -50%) scaleY(0.1)",
           borderRadius: "50%",
