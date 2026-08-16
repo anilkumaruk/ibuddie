@@ -36,7 +36,6 @@ const NAV_ITEMS = [
   { key: "doubt", label: "Doubt Desk", icon: ClipboardCheck },
   { key: "mocktest", label: "Daily Mock Test", icon: Calendar },
   { key: "topics", label: "Important Topics", icon: BookMarked },
-  { key: "voicecall", label: "Talk to iBuddie", icon: Phone },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -73,6 +72,14 @@ export default function App({ user, onLogout }) {
   const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 768 : false));
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("ibuddie_wake_word") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const wakeRecognitionRef = useRef(null);
   const [voiceCallOpen, setVoiceCallOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceLang, setVoiceLang] = useState("en-IN"); // "en-IN" | "kn-IN" — language for voice input
@@ -513,6 +520,76 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
     e.target.value = "";
   }
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("ibuddie_wake_word", wakeWordEnabled ? "true" : "false");
+    } catch {}
+  }, [wakeWordEnabled]);
+
+  // Background "Hey Darling" listener — only runs while enabled, and pauses whenever the
+  // regular mic or the voice call itself is already using the microphone, to avoid conflicts.
+  useEffect(() => {
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!wakeWordEnabled || !SpeechRecognitionCtor || recording || voiceCallOpen) {
+      wakeRecognitionRef.current?.stop();
+      return;
+    }
+
+    let stopped = false;
+
+    function startWakeListener() {
+      if (stopped) return;
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = voiceLang;
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript.toLowerCase();
+          if (transcript.includes("hey darling") || transcript.includes("hey, darling")) {
+            const isProUser = MODEL_ORDER.some((key) => subscriptions[key]?.active);
+            if (isProUser) setVoiceCallOpen(true);
+            else {
+              setUpgradeModel(selectedModel);
+              setUpgradeOpen(true);
+            }
+            return;
+          }
+        }
+      };
+      recognition.onerror = (event) => {
+        if (stopped) return;
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setWakeWordEnabled(false); // mic permission denied — turn the feature back off cleanly
+        }
+        // other errors (e.g. "no-speech", which is expected often during ambient listening) — onend handles restart
+      };
+      recognition.onend = () => {
+        if (!stopped) {
+          try {
+            recognition.start();
+          } catch {}
+        }
+      };
+
+      wakeRecognitionRef.current = recognition;
+      try {
+        recognition.start();
+      } catch {}
+    }
+
+    startWakeListener();
+
+    return () => {
+      stopped = true;
+      try {
+        wakeRecognitionRef.current?.stop();
+      } catch {}
+    };
+  }, [wakeWordEnabled, recording, voiceCallOpen, voiceLang, subscriptions, selectedModel]);
+
   function toggleVoiceInput() {
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
@@ -877,15 +954,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               title={item.label}
               onClick={() => {
                 if (item.key === "settings") setSettingsOpen(true);
-                else if (item.key === "voicecall") {
-                  const isProUser = MODEL_ORDER.some((key) => subscriptions[key]?.active);
-                  if (isProUser) setVoiceCallOpen(true);
-                  else {
-                    setUpgradeModel(selectedModel);
-                    setUpgradeOpen(true);
-                  }
-                  if (isMobile) setSidebarOpen(false);
-                } else {
+                else {
                   setView(item.key);
                   if (isMobile) setSidebarOpen(false);
                 }
@@ -1301,6 +1370,20 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                     onClick={toggleVoiceInput}
                     title={`Voice input (${voiceLang === "en-IN" ? "English" : "Kannada"})`}
                   />
+                  <Phone
+                    size={18}
+                    color="#8C7D6B"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => {
+                      const isProUser = MODEL_ORDER.some((key) => subscriptions[key]?.active);
+                      if (isProUser) setVoiceCallOpen(true);
+                      else {
+                        setUpgradeModel(selectedModel);
+                        setUpgradeOpen(true);
+                      }
+                    }}
+                    title="Talk live with iBuddie"
+                  />
                   <button
                     onClick={sendMessage}
                     disabled={loading || (!input.trim() && !attachedImage)}
@@ -1549,6 +1632,28 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 16 }}>Settings</div>
                 <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 4 }}>Signed in as</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "#2B2018", marginBottom: 18 }}>{user?.name || "—"}</div>
+                <div style={{ padding: "10px 0", borderTop: "1px solid #E4E2DA" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: "#2B2018" }}>"Hey Darling" wake word</div>
+                    <div
+                      onClick={() => setWakeWordEnabled((prev) => !prev)}
+                      style={{
+                        width: 40, height: 22, borderRadius: 999, cursor: "pointer",
+                        background: wakeWordEnabled ? GREEN : "#E4E2DA",
+                        position: "relative", transition: "background 0.15s ease",
+                      }}
+                    >
+                      <div style={{
+                        position: "absolute", top: 2, left: wakeWordEnabled ? 20 : 2,
+                        width: 18, height: 18, borderRadius: "50%", background: "#FFFFFF",
+                        transition: "left 0.15s ease",
+                      }} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginTop: 4 }}>
+                    Keeps the mic listening in the background so saying "Hey Darling" opens a voice call automatically. Only works while this tab is open and focused.
+                  </div>
+                </div>
                 <div
                   onClick={() => {
                     localStorage.removeItem("ibuddie_messages");
