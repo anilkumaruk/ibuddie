@@ -8,6 +8,13 @@ const GREETINGS = {
   "kn-IN": "ನಮಸ್ತೆ ಗೆಳೆಯ! ಇವತ್ತು ನಿಮಗೆ ಏನು ಸಹಾಯ ಬೇಕು?",
 };
 
+// Pre-generated once and served as static files from /public — the greeting plays
+// instantly this way, no live Cloud Run request and no cold-start wait.
+const GREETING_AUDIO_PATH = {
+  "en-IN": "/greeting-en.wav",
+  "kn-IN": "/greeting-kn.wav",
+};
+
 const CLOSINGS = {
   "en-IN": "You're welcome! All the best with your studies.",
   "kn-IN": "ಸ್ವಾಗತ! ನಿಮ್ಮ ಓದಿಗೆ ಶುಭಾಶಯಗಳು.",
@@ -207,7 +214,28 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
   }
 
   async function runGreeting() {
-    await speakText(GREETINGS[voiceLang] || GREETINGS["en-IN"]);
+    if (stoppedRef.current) return;
+    updatePhase("speaking");
+    ensureAnalyser();
+    const audioPath = GREETING_AUDIO_PATH[voiceLang] || GREETING_AUDIO_PATH["en-IN"];
+    try {
+      await new Promise((resolve, reject) => {
+        const player = new Audio(audioPath);
+        audioPlayerRef.current = player;
+        try {
+          const source = audioContextRef.current.createMediaElementSource(player);
+          source.connect(analyserRef.current);
+        } catch (e) {
+          console.error("Avatar mouth won't be reactive for the greeting:", e);
+        }
+        player.onended = resolve;
+        player.onerror = reject; // missing/broken file — fall back to live generation below
+        player.play().catch(reject);
+      });
+    } catch (e) {
+      console.error("Cached greeting playback failed, falling back to live TTS:", e);
+      if (!stoppedRef.current) await speakText(GREETINGS[voiceLang] || GREETINGS["en-IN"]);
+    }
     if (!stoppedRef.current) startListening();
   }
 
