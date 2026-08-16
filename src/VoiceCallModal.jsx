@@ -120,7 +120,8 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
   const stoppedRef = useRef(false);
   const recognitionRef = useRef(null);
   const silenceTimerRef = useRef(null);
-  const finalTranscriptRef = useRef("");
+  const finalTranscriptRef = useRef(""); // the live-building transcript for the current turn
+  const carryOverPrefixRef = useRef(""); // text preserved from a prior session that ended early mid-turn
   const deliberateStopRef = useRef(false);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -222,7 +223,8 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     }
     setLastHeard(carryOverText);
     updatePhase("listening");
-    finalTranscriptRef.current = carryOverText ? carryOverText + " " : "";
+    carryOverPrefixRef.current = carryOverText ? carryOverText + " " : "";
+    finalTranscriptRef.current = carryOverPrefixRef.current;
     deliberateStopRef.current = false;
 
     const recognition = new SpeechRecognitionCtor();
@@ -242,12 +244,17 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     }
 
     recognition.onresult = (event) => {
+      // Rebuild fresh from index 0 every time, rather than appending with resultIndex — some
+      // Android/mobile browsers occasionally re-deliver already-final results, and appending
+      // them compounds into repeated/duplicated text. Rebuilding avoids that entirely.
+      let finalText = "";
       let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const piece = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalTranscriptRef.current += piece + " ";
+        if (event.results[i].isFinal) finalText += piece + " ";
         else interim += piece;
       }
+      finalTranscriptRef.current = carryOverPrefixRef.current + finalText;
       setLastHeard((finalTranscriptRef.current + interim).trim());
       resetSilenceTimer(); // any activity — even mid-word — pushes the "are they done" deadline out
     };
