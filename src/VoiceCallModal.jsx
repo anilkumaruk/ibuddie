@@ -146,12 +146,25 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     setLastHeard("");
     updatePhase("greeting");
     runGreeting();
+    warmUpVoiceService(); // fire-and-forget — gets Cloud Run awake in the background while the cached greeting plays
 
     return () => {
       hardStop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Since the greeting now plays from a cached file (no live request), the voice service never
+  // gets woken up beforehand — without this, the student's FIRST real question would eat the
+  // full cold-start delay instead. This silently pings it in the background so it's already
+  // warm by the time an actual response needs to be spoken.
+  function warmUpVoiceService() {
+    fetch("/api/text-to-speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: ".", languageCode: voiceLang }),
+    }).catch(() => {}); // best-effort — a failure here just means no warm-up happened, nothing else depends on it
+  }
 
   function hardStop() {
     stoppedRef.current = true;
