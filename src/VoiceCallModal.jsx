@@ -372,6 +372,7 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
       const sentenceEndRegex = /[.!?।]+(\s|$)/;
       let buffer = "";
       let fullText = "";
+      let isFirstChunk = true;
       const chunkPromises = [];
 
       // Peel off complete sentences as they stream in and start synthesizing them
@@ -388,7 +389,22 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
           const cut = match.index + match[0].length;
           const sentence = buffer.slice(0, cut).trim();
           buffer = buffer.slice(cut);
-          if (sentence) chunkPromises.push(fetchSpeechChunk(sentence, voiceLang));
+          if (!sentence) continue;
+
+          if (isFirstChunk && sentence.length > 70) {
+            // The very first sentence is what the student waits on — if it's long, split off
+            // just a short opening burst so speech starts sooner instead of waiting for the
+            // whole sentence to both finish generating and finish synthesizing.
+            let splitAt = sentence.lastIndexOf(" ", 70);
+            if (splitAt <= 0) splitAt = 70;
+            const opening = sentence.slice(0, splitAt).trim();
+            const rest = sentence.slice(splitAt).trim();
+            chunkPromises.push(fetchSpeechChunk(opening, voiceLang));
+            if (rest) chunkPromises.push(fetchSpeechChunk(rest, voiceLang));
+          } else {
+            chunkPromises.push(fetchSpeechChunk(sentence, voiceLang));
+          }
+          isFirstChunk = false;
         }
       }
       const trailing = buffer.trim();
