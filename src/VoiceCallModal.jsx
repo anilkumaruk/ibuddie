@@ -122,6 +122,8 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
   const [phase, setPhase] = useState("greeting");
   const [lastHeard, setLastHeard] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [conversationHistory, setConversationHistory] = useState([]); // [{ role: "user" | "assistant", text }]
+  const historyEndRef = useRef(null);
 
   const phaseRef = useRef("greeting");
   const stoppedRef = useRef(false);
@@ -144,6 +146,7 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     stoppedRef.current = false;
     setErrorMsg("");
     setLastHeard("");
+    setConversationHistory([]);
     updatePhase("greeting");
     runGreeting();
     warmUpVoiceService(); // fire-and-forget — gets Cloud Run awake in the background while the cached greeting plays
@@ -153,6 +156,10 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  useEffect(() => {
+    historyEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [conversationHistory]);
 
   // Since the greeting now plays from a cached file (no live request), the voice service never
   // gets woken up beforehand — without this, the student's FIRST real question would eat the
@@ -353,6 +360,7 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     recognitionRef.current?.stop();
     updatePhase("thinking");
     ensureAnalyser();
+    setConversationHistory((prev) => [...prev, { role: "user", text: question }]);
 
     const isGeneral = subject === "general";
     const systemPrompt = isGeneral
@@ -412,8 +420,11 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
 
       if (stoppedRef.current) return;
 
+      const answerText = fullText.trim() || "Sorry, I didn't catch that clearly — could you say it again?";
+      setConversationHistory((prev) => [...prev, { role: "assistant", text: answerText }]);
+
       if (chunkPromises.length === 0) {
-        await speakText(fullText.trim() || "Sorry, I didn't catch that clearly — could you say it again?");
+        await speakText(answerText);
       } else {
         updatePhase("speaking");
         await playBlobsInOrder(chunkPromises, stoppedRef, audioPlayerRef, audioContextRef, analyserRef);
@@ -421,7 +432,9 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     } catch (e) {
       console.error("Voice call ask/speak failed:", e);
       if (stoppedRef.current) return;
-      await speakText("Sorry, I couldn't reach the server just now. Could you try again?");
+      const fallbackText = "Sorry, I couldn't reach the server just now. Could you try again?";
+      setConversationHistory((prev) => [...prev, { role: "assistant", text: fallbackText }]);
+      await speakText(fallbackText);
     }
     if (!stoppedRef.current) startListening();
   }
@@ -462,6 +475,39 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
       </button>
 
       <AvatarKeyframes />
+
+      {conversationHistory.length > 0 && (
+        <div
+          style={{
+            position: "fixed", top: 60, bottom: 60, right: 24,
+            width: 300, maxWidth: "85vw",
+            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 16, padding: 16,
+            display: "flex", flexDirection: "column", gap: 12,
+            overflowY: "auto",
+          }}
+        >
+          <div style={{ color: PAPER, fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", opacity: 0.6, marginBottom: 2 }}>
+            Conversation
+          </div>
+          {conversationHistory.map((entry, i) => (
+            <div
+              key={i}
+              style={{
+                alignSelf: entry.role === "user" ? "flex-end" : "flex-start",
+                maxWidth: "90%",
+                background: entry.role === "user" ? "rgba(120,200,255,0.15)" : "rgba(255,255,255,0.08)",
+                color: PAPER,
+                fontSize: 13.5, lineHeight: 1.4,
+                padding: "8px 12px", borderRadius: 12,
+              }}
+            >
+              {entry.text}
+            </div>
+          ))}
+          <div ref={historyEndRef} />
+        </div>
+      )}
     </div>
   );
 }
