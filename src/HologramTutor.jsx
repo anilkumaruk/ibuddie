@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-export default function HologramTutor({ isSpeaking, analyserRef, imageSrc = "/tutor-face.png", size = 320 }) {
+export default function HologramTutor({ isSpeaking, analyserRef, imageSrc = "/tutor-face.webp", size = 320 }) {
   const imgRef = useRef(null);
   const mouthGlowRef = useRef(null);
   const mouthGapRef = useRef(null);
