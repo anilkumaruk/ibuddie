@@ -5,7 +5,7 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment } from "firebase/firestore";
@@ -36,6 +36,7 @@ const NAV_ITEMS = [
   { key: "doubt", label: "Doubt Desk", icon: ClipboardCheck },
   { key: "mocktest", label: "Daily Mock Test", icon: Calendar },
   { key: "topics", label: "Important Topics", icon: BookMarked },
+  { key: "pyq", label: "PYQ Bank", icon: FileQuestion },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -113,6 +114,8 @@ export default function App({ user, onLogout }) {
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,
   });
   const [topicsState, setTopicsState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
+  const [pyqState, setPyqState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
+  const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -401,6 +404,30 @@ export default function App({ user, onLogout }) {
       console.error(e);
       alert(`Couldn't load important topics: ${e.message}`);
       setTopicsState({ status: "setup", list: [] });
+    }
+  }
+
+  async function generatePyq() {
+    if (subject === "general") return;
+    if (!canUseModel()) return;
+
+    setPyqState({ status: "loading", list: [] });
+    setExpandedPyqIndex(null);
+    try {
+      const res = await fetch("/api/pyq", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: currentSubject.label, exam, model: selectedModel }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.questions) throw new Error(data.error || `Server error (${res.status})`);
+
+      consumeUsage();
+      setPyqState({ status: "results", list: data.questions });
+    } catch (e) {
+      console.error(e);
+      alert(`Couldn't load practice questions: ${e.message}`);
+      setPyqState({ status: "setup", list: [] });
     }
   }
 
@@ -1082,7 +1109,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -1616,6 +1643,93 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                     style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
                   >
                     <RotateCcw size={15} /> Regenerate
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {view === "pyq" && (
+            <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+              {subject === "general" ? (
+                <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", maxWidth: 320 }}>
+                  <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 12 }} />
+                  <div style={{ fontSize: 14.5 }}>Pick a subject (Physics, Chemistry, Biology, or Mathematics) from above to see practice questions.</div>
+                </div>
+              ) : pyqState.status === "setup" ? (
+                <div style={{ margin: "auto", textAlign: "center", maxWidth: 360 }}>
+                  <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 14 }} />
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{currentSubject.label} — PYQ Bank</div>
+                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 6 }}>Practice questions in the style and difficulty of past {exam} papers, with full step-by-step solutions.</div>
+                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 22, fontStyle: "italic" }}>AI-generated in the pattern of real exam papers — not verbatim reproductions of an official paper.</div>
+                  <button
+                    onClick={generatePyq}
+                    style={{ padding: "13px 26px", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}
+                  >
+                    Generate Practice Questions
+                  </button>
+                </div>
+              ) : pyqState.status === "loading" ? (
+                <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", fontSize: 13.5 }}>Building {currentSubject.label} practice questions…</div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — PYQ Bank</div>
+                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>{exam} level · tap a question to reveal the answer and full solution</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
+                    {pyqState.list.map((q, qi) => {
+                      const isOpen = expandedPyqIndex === qi;
+                      return (
+                        <div key={qi} style={{ border: "1px solid #E4E2DA", borderRadius: 14, overflow: "hidden" }}>
+                          <div
+                            onClick={() => setExpandedPyqIndex(isOpen ? null : qi)}
+                            style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, padding: "14px 16px", background: "#F2F2F0", cursor: "pointer" }}
+                          >
+                            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                              <div style={{ width: 22, height: 22, borderRadius: 6, background: "#B8860B22", color: "#8F6A08", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>{qi + 1}</div>
+                              <div>
+                                <div style={{ fontSize: 13.5, fontWeight: 700, color: "#2B2018", lineHeight: 1.5 }}>{q.question}</div>
+                                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: "#8F6A08", background: "#B8860B14", padding: "2px 8px", borderRadius: 999 }}>{q.topic}</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: "#8C7D6B", background: "#F9F9F7", border: "1px solid #E4E2DA", padding: "2px 8px", borderRadius: 999 }}>{q.difficulty}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <ChevronDown size={16} color="#8C7D6B" style={{ flexShrink: 0, marginTop: 3, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }} />
+                          </div>
+                          {isOpen && (
+                            <div style={{ padding: 16 }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+                                {(q.options || []).map((opt, oi) => (
+                                  <div
+                                    key={oi}
+                                    style={{
+                                      display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, fontSize: 13,
+                                      border: oi === q.correctIndex ? "1.5px solid #2F6B4A" : "1px solid #E4E2DA",
+                                      background: oi === q.correctIndex ? "#2F6B4A14" : "#FFFFFF",
+                                      color: oi === q.correctIndex ? "#215038" : "#2B2018",
+                                      fontWeight: oi === q.correctIndex ? 700 : 400,
+                                    }}
+                                  >
+                                    {oi === q.correctIndex ? <CheckCircle2 size={15} color="#2F6B4A" style={{ flexShrink: 0 }} /> : <div style={{ width: 15, flexShrink: 0 }} />}
+                                    {opt}
+                                  </div>
+                                ))}
+                              </div>
+                              <div style={{ background: "#F9F9F7", border: "1px solid #E4E2DA", borderRadius: 10, padding: 12 }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Step-by-step solution</div>
+                                <div style={{ fontSize: 12.5, color: "#2B2018", lineHeight: 1.6 }}>{q.solution}</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setPyqState({ status: "setup", list: [] })}
+                    style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                  >
+                    <RotateCcw size={15} /> Generate New Set
                   </button>
                 </div>
               )}
