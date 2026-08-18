@@ -32,6 +32,28 @@ const EXAMS = ["NEET", "JEE", "KCET"];
 const ACCENT = "#17140F"; // landing page's "ink"
 const GREEN = "#2F6B4A"; // landing page's checkmark green
 
+// Standard Karnataka PUC / NCERT-aligned chapter lists, used for the PYQ Bank's
+// browse-by-chapter mode. Hardcoded rather than AI-generated since syllabus structure
+// is stable factual data, not something worth risking a generation failure over.
+const PUC_SYLLABUS = {
+  Physics: {
+    "1st": ["Physical World and Measurement", "Kinematics", "Laws of Motion", "Work, Energy and Power", "Motion of System of Particles and Rigid Body", "Gravitation", "Mechanical Properties of Solids and Fluids", "Thermal Properties of Matter", "Thermodynamics", "Kinetic Theory", "Oscillations", "Waves"],
+    "2nd": ["Electrostatics", "Current Electricity", "Magnetic Effects of Current and Magnetism", "Electromagnetic Induction and AC", "Electromagnetic Waves", "Ray Optics and Optical Instruments", "Wave Optics", "Dual Nature of Matter and Radiation", "Atoms and Nuclei", "Electronic Devices", "Communication Systems"],
+  },
+  Chemistry: {
+    "1st": ["Some Basic Concepts of Chemistry", "Structure of Atom", "Classification of Elements and Periodicity", "Chemical Bonding and Molecular Structure", "States of Matter", "Thermodynamics", "Equilibrium", "Redox Reactions", "Hydrogen", "The s-Block Elements", "The p-Block Elements (Groups 13-14)", "Organic Chemistry — Basic Principles", "Hydrocarbons", "Environmental Chemistry"],
+    "2nd": ["Solid State", "Solutions", "Electrochemistry", "Chemical Kinetics", "Surface Chemistry", "The p-Block Elements", "The d and f Block Elements", "Coordination Compounds", "Haloalkanes and Haloarenes", "Alcohols, Phenols and Ethers", "Aldehydes, Ketones and Carboxylic Acids", "Amines", "Biomolecules", "Polymers", "Chemistry in Everyday Life"],
+  },
+  Biology: {
+    "1st": ["Diversity in Living World", "Structural Organisation in Animals and Plants", "Cell Structure and Function", "Plant Physiology", "Human Physiology"],
+    "2nd": ["Reproduction", "Genetics and Evolution", "Biology and Human Welfare", "Biotechnology and Its Applications", "Ecology and Environment"],
+  },
+  Mathematics: {
+    "1st": ["Sets", "Relations and Functions", "Trigonometric Functions", "Complex Numbers", "Linear Inequalities", "Permutations and Combinations", "Binomial Theorem", "Sequences and Series", "Straight Lines", "Conic Sections", "Introduction to 3D Geometry", "Limits and Derivatives", "Statistics", "Probability"],
+    "2nd": ["Relations and Functions", "Inverse Trigonometric Functions", "Matrices", "Determinants", "Continuity and Differentiability", "Application of Derivatives", "Integrals", "Application of Integrals", "Differential Equations", "Vector Algebra", "Three Dimensional Geometry", "Linear Programming", "Probability"],
+  },
+};
+
 const NAV_ITEMS = [
   { key: "doubt", label: "Doubt Desk", icon: ClipboardCheck },
   { key: "mocktest", label: "Daily Mock Test", icon: Calendar },
@@ -114,7 +136,10 @@ export default function App({ user, onLogout }) {
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,
   });
   const [topicsState, setTopicsState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
-  const [pyqState, setPyqState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
+  const [pyqStep, setPyqStep] = useState("puc"); // "puc" | "browse" | "chapters" | "years" | "loading" | "results"
+  const [pyqSelectionType, setPyqSelectionType] = useState(""); // "chapter" | "year"
+  const [pyqSelection, setPyqSelection] = useState(""); // the chosen chapter name or year
+  const [pyqList, setPyqList] = useState([]);
   const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
   const scrollRef = useRef(null);
@@ -407,27 +432,37 @@ export default function App({ user, onLogout }) {
     }
   }
 
-  async function generatePyq() {
+  async function generatePyq(selectionType, selection) {
     if (subject === "general") return;
     if (!canUseModel()) return;
 
-    setPyqState({ status: "loading", list: [] });
+    setPyqSelectionType(selectionType);
+    setPyqSelection(selection);
+    setPyqStep("loading");
     setExpandedPyqIndex(null);
     try {
       const res = await fetch("/api/pyq", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: currentSubject.label, exam, model: selectedModel }),
+        body: JSON.stringify({
+          subject: currentSubject.label,
+          exam,
+          puc: pucYear,
+          model: selectedModel,
+          chapter: selectionType === "chapter" ? selection : undefined,
+          year: selectionType === "year" ? selection : undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.questions) throw new Error(data.error || `Server error (${res.status})`);
 
       consumeUsage();
-      setPyqState({ status: "results", list: data.questions });
+      setPyqList(data.questions);
+      setPyqStep("results");
     } catch (e) {
       console.error(e);
       alert(`Couldn't load practice questions: ${e.message}`);
-      setPyqState({ status: "setup", list: [] });
+      setPyqStep("browse");
     }
   }
 
@@ -982,6 +1017,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               onClick={() => {
                 if (item.key === "settings") setSettingsOpen(true);
                 else {
+                  if (item.key === "pyq") setPyqStep("puc");
                   setView(item.key);
                   if (isMobile) setSidebarOpen(false);
                 }
@@ -1152,7 +1188,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               {SUBJECTS.map((s) => (
                 <div
                   key={s.id}
-                  onClick={() => setSubject(s.id)}
+                  onClick={() => { setSubject(s.id); setPyqStep("puc"); }}
                   style={{
                     width: isMobile ? 50 : 56, padding: isMobile ? "7px 5px" : "8px 5px", borderRadius: isMobile ? 9 : 10, textAlign: "center", cursor: "pointer",
                     background: subject === s.id ? `${s.color}14` : "#FFFFFF",
@@ -1656,27 +1692,98 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 12 }} />
                   <div style={{ fontSize: 14.5 }}>Pick a subject (Physics, Chemistry, Biology, or Mathematics) from above to see practice questions.</div>
                 </div>
-              ) : pyqState.status === "setup" ? (
+              ) : pyqStep === "puc" ? (
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 360 }}>
                   <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 14 }} />
                   <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{currentSubject.label} — PYQ Bank</div>
-                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 6 }}>Practice questions in the style and difficulty of past {exam} papers, with full step-by-step solutions.</div>
-                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 22, fontStyle: "italic" }}>AI-generated in the pattern of real exam papers — not verbatim reproductions of an official paper.</div>
-                  <button
-                    onClick={generatePyq}
-                    style={{ padding: "13px 26px", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}
-                  >
-                    Generate Practice Questions
-                  </button>
+                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>Which class are you in?</div>
+                  <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                    {[{ id: "1st", label: "1st PUC" }, { id: "2nd", label: "2nd PUC" }].map((p) => (
+                      <div
+                        key={p.id}
+                        onClick={() => { setPucYear(p.id); setPyqStep("browse"); }}
+                        style={{
+                          padding: "14px 28px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 700,
+                          border: "1.5px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018",
+                        }}
+                      >
+                        {p.label}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ) : pyqState.status === "loading" ? (
+              ) : pyqStep === "browse" ? (
+                <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{pucYear} PUC · {currentSubject.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 22 }}>How do you want to browse?</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div
+                      onClick={() => setPyqStep("chapters")}
+                      style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
+                    >
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>By Chapter</div>
+                      <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Pick a specific chapter to practice</div>
+                    </div>
+                    <div
+                      onClick={() => setPyqStep("years")}
+                      style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
+                    >
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>By Year</div>
+                      <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Practice in the style of a specific exam year (last 5 years)</div>
+                    </div>
+                  </div>
+                  <div onClick={() => setPyqStep("puc")} style={{ marginTop: 20, fontSize: 12.5, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}>
+                    ← Change class
+                  </div>
+                </div>
+              ) : pyqStep === "chapters" ? (
+                <div style={{ maxWidth: 480, margin: "0 auto", width: "100%" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8, textAlign: "center" }}>{pucYear} PUC · {currentSubject.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 20, textAlign: "center" }}>Choose a chapter</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {(PUC_SYLLABUS[currentSubject.label]?.[pucYear] || []).map((chapter) => (
+                      <div
+                        key={chapter}
+                        onClick={() => generatePyq("chapter", chapter)}
+                        style={{ padding: "13px 16px", borderRadius: 10, border: "1px solid #E4E2DA", cursor: "pointer", fontSize: 13.5, color: "#2B2018", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                      >
+                        {chapter}
+                        <ChevronDown size={14} color="#8C7D6B" style={{ transform: "rotate(-90deg)" }} />
+                      </div>
+                    ))}
+                  </div>
+                  <div onClick={() => setPyqStep("browse")} style={{ marginTop: 18, fontSize: 12.5, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline", textAlign: "center" }}>
+                    ← Back
+                  </div>
+                </div>
+              ) : pyqStep === "years" ? (
+                <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{pucYear} PUC · {currentSubject.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Choose a year</div>
+                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>Questions generated in that year's exam style — not verbatim official papers.</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
+                    {[2026, 2025, 2024, 2023, 2022].map((yr) => (
+                      <div
+                        key={yr}
+                        onClick={() => generatePyq("year", String(yr))}
+                        style={{ padding: "13px 22px", borderRadius: 12, border: "1.5px solid #E4E2DA", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#2B2018" }}
+                      >
+                        {yr}
+                      </div>
+                    ))}
+                  </div>
+                  <div onClick={() => setPyqStep("browse")} style={{ marginTop: 20, fontSize: 12.5, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}>
+                    ← Back
+                  </div>
+                </div>
+              ) : pyqStep === "loading" ? (
                 <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", fontSize: 13.5 }}>Building {currentSubject.label} practice questions…</div>
               ) : (
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — PYQ Bank</div>
-                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>{exam} level · tap a question to reveal the answer and full solution</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — {pyqSelectionType === "chapter" ? pyqSelection : `${pyqSelection} pattern`}</div>
+                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>{pucYear} PUC · {exam} level · tap a question to reveal the answer and full solution</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
-                    {pyqState.list.map((q, qi) => {
+                    {pyqList.map((q, qi) => {
                       const isOpen = expandedPyqIndex === qi;
                       return (
                         <div key={qi} style={{ border: "1px solid #E4E2DA", borderRadius: 14, overflow: "hidden" }}>
@@ -1725,12 +1832,20 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       );
                     })}
                   </div>
-                  <button
-                    onClick={() => setPyqState({ status: "setup", list: [] })}
-                    style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-                  >
-                    <RotateCcw size={15} /> Generate New Set
-                  </button>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button
+                      onClick={() => setPyqStep(pyqSelectionType === "chapter" ? "chapters" : "years")}
+                      style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+                    >
+                      ← Pick Another
+                    </button>
+                    <button
+                      onClick={() => generatePyq(pyqSelectionType, pyqSelection)}
+                      style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                    >
+                      <RotateCcw size={15} /> New Set
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
