@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "./Login.jsx";
+import { STORED_PYQ_PAPERS } from "./data/pyqPapers.js";
 import AvatarWidget from "./AvatarWidget.jsx";
 import VoiceCallModal from "./VoiceCallModal.jsx";
 
@@ -434,12 +435,26 @@ export default function App({ user, onLogout }) {
 
   async function generatePyq(selectionType, selection) {
     if (subject === "general") return;
-    if (!canUseModel()) return;
 
     setPyqSelectionType(selectionType);
     setPyqSelection(selection);
-    setPyqStep("loading");
     setExpandedPyqIndex(null);
+
+    // Year-based browsing = real stored papers only, never AI-generated. Check storage first.
+    if (selectionType === "year") {
+      const key = `${exam}_${selection}_${currentSubject.label}`;
+      const stored = STORED_PYQ_PAPERS[key];
+      if (stored && stored.length > 0) {
+        setPyqList(stored);
+        setPyqStep("results");
+        return;
+      }
+      setPyqStep("unavailable");
+      return;
+    }
+
+    if (!canUseModel()) return;
+    setPyqStep("loading");
     try {
       const res = await fetch("/api/pyq", {
         method: "POST",
@@ -450,7 +465,6 @@ export default function App({ user, onLogout }) {
           puc: pucYear,
           model: selectedModel,
           chapter: selectionType === "chapter" ? selection : undefined,
-          year: selectionType === "year" ? selection : undefined,
         }),
       });
       const data = await res.json();
@@ -1760,7 +1774,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{pucYear} PUC · {currentSubject.label}</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Choose a year</div>
-                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>Questions generated in that year's exam style — not verbatim official papers.</div>
+                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>Real questions from that year's actual paper, where available.</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
                     {[2026, 2025, 2024, 2023, 2022].map((yr) => (
                       <div
@@ -1776,11 +1790,31 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                     ← Back
                   </div>
                 </div>
+              ) : pyqStep === "unavailable" ? (
+                <div style={{ margin: "auto", textAlign: "center", maxWidth: 360 }}>
+                  <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 14 }} />
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{pyqSelection} not added yet</div>
+                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>We haven't stored a real {currentSubject.label} paper for {pyqSelection} yet. Try another year, or browse by chapter instead.</div>
+                  <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                    <button
+                      onClick={() => setPyqStep("years")}
+                      style={{ padding: "11px 20px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}
+                    >
+                      ← Try Another Year
+                    </button>
+                    <button
+                      onClick={() => setPyqStep("chapters")}
+                      style={{ padding: "11px 20px", borderRadius: 10, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}
+                    >
+                      Browse by Chapter
+                    </button>
+                  </div>
+                </div>
               ) : pyqStep === "loading" ? (
                 <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", fontSize: 13.5 }}>Building {currentSubject.label} practice questions…</div>
               ) : (
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — {pyqSelectionType === "chapter" ? pyqSelection : `${pyqSelection} pattern`}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — {pyqSelectionType === "chapter" ? pyqSelection : `${exam} ${pyqSelection}`}</div>
                   <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>{pucYear} PUC · {exam} level · tap a question to reveal the answer and full solution</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
                     {pyqList.map((q, qi) => {
@@ -1822,6 +1856,11 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                                   </div>
                                 ))}
                               </div>
+                              {q.correctIndex === null && (
+                                <div style={{ background: "#FFF4E5", border: "1px solid #E8C468", borderRadius: 10, padding: "8px 12px", marginBottom: 10, fontSize: 11.5, color: "#8F6A08", fontWeight: 700 }}>
+                                  ⚠ Answer not confidently resolved — see note below
+                                </div>
+                              )}
                               <div style={{ background: "#F9F9F7", border: "1px solid #E4E2DA", borderRadius: 10, padding: 12 }}>
                                 <div style={{ fontSize: 10, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Step-by-step solution</div>
                                 <div style={{ fontSize: 12.5, color: "#2B2018", lineHeight: 1.6 }}>{q.solution}</div>
