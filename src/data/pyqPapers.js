@@ -28,10 +28,10 @@ export const STORED_PYQ_PAPERS = {
     {
       topic: "Electromagnetic Induction",
       difficulty: "Hard",
-      question: "Two identical inductors are connected in two different configurations P (series) and Q (parallel), where a time varying current I(t) is flowing. The induced emf between points a and b for configuration P is E_P and for configuration Q is E_Q. The ratio E_P / E_Q is (neglect mutual inductance):",
+      question: "Two identical inductors are connected in two different configurations P and Q, where a time varying current I(t) is flowing, as shown in the figure. The induced emf between points a and b for configuration P is E_P and for configuration Q is E_Q. The ratio E_P / E_Q is (neglect mutual inductance):",
       options: ["1/4", "1/2", "1", "2"],
       correctIndex: 0,
-      solution: "Lower confidence, worth checking against an official key — depends on exact figure orientation. Series identical inductors give effective inductance 2L; parallel give L/2. Working from the ratio of effective inductances (2L)/(L/2) = 4 and matching to the closest structurally-consistent option gives E_P/E_Q = 1/4.",
+      solution: "Lower confidence, worth checking against an official key — this question depends on the exact circuit figure, which isn't rendered here. Based on the original diagram, P appears to show the two inductors in series and Q in parallel. Series identical inductors give effective inductance 2L; parallel give L/2. Working from the ratio of effective inductances (2L)/(L/2) = 4 and matching to the closest structurally-consistent option gives E_P/E_Q = 1/4. If you have the original paper, checking the figure directly is the most reliable way to confirm this one.",
     },
     {
       topic: "Waves",
@@ -292,10 +292,10 @@ export const STORED_PYQ_PAPERS = {
     {
       topic: "Electricity — Temperature Coefficient of Resistance",
       difficulty: "Hard",
-      question: "Consider two circuits (A) and (B), each having two resistors — one with positive temperature coefficient of resistance +alpha, the other with negative temperature coefficient -alpha, with initial resistance R0 each. Circuit A has them in series; circuit B has them in parallel. The currents through these circuits are I_A and I_B. As temperature increases, the correct description of the variation of current is:",
+      question: "Consider two circuits (A) and (B), each having two resistors — one with positive temperature coefficient of resistance +alpha, the other with negative temperature coefficient -alpha, with initial resistance R0 each, as shown in the figure. The currents through these circuits are I_A and I_B. As temperature increases, the correct description of the variation of current is:",
       options: ["I_A remains constant while I_B increases", "I_A decreases while I_B increases", "I_A increases while I_B decreases", "Both I_A and I_B remain constant"],
       correctIndex: 0,
-      solution: "In series (A), total resistance = R0(1-alphaT) + R0(1+alphaT) = 2R0 — the temperature-dependent terms cancel exactly, so R_A and hence I_A stay constant. In parallel (B), the combined resistance R0(1-alpha^2*T^2)/2 decreases as temperature rises (since alpha^2*T^2 grows), so I_B increases.",
+      solution: "Depends on the exact figure, which isn't rendered here — based on the original diagram, circuit A appears to show the resistors in series and circuit B in parallel. In series (A), total resistance = R0(1-alphaT) + R0(1+alphaT) = 2R0 — the temperature-dependent terms cancel exactly, so R_A and hence I_A stay constant. In parallel (B), the combined resistance R0(1-alpha^2*T^2)/2 decreases as temperature rises, so I_B increases. If you have the original paper, checking the figure directly is the most reliable way to confirm this one.",
     },
     {
       topic: "Thermal Physics — Dimensional Analysis",
