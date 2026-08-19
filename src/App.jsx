@@ -140,6 +140,7 @@ export default function App({ user, onLogout }) {
   const [pyqStep, setPyqStep] = useState("puc"); // "puc" | "browse" | "chapters" | "years" | "loading" | "results"
   const [pyqSelectionType, setPyqSelectionType] = useState(""); // "chapter" | "year"
   const [pyqSelection, setPyqSelection] = useState(""); // the chosen chapter name or year
+  const [pyqSetNumber, setPyqSetNumber] = useState(""); // which NEET/JEE/KCET set code (50/60/70/80), for year-based browsing
   const [pyqList, setPyqList] = useState([]);
   const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
@@ -440,16 +441,11 @@ export default function App({ user, onLogout }) {
     setPyqSelection(selection);
     setExpandedPyqIndex(null);
 
-    // Year-based browsing = real stored papers only, never AI-generated. Check storage first.
+    // Year-based browsing = real stored papers only, never AI-generated.
+    // NEET/JEE/KCET each release multiple sets per year, so ask which set next.
     if (selectionType === "year") {
-      const key = `${exam}_${selection}_${currentSubject.label}`;
-      const stored = STORED_PYQ_PAPERS[key];
-      if (stored && stored.length > 0) {
-        setPyqList(stored);
-        setPyqStep("results");
-        return;
-      }
-      setPyqStep("unavailable");
+      setPyqSetNumber("");
+      setPyqStep("sets");
       return;
     }
 
@@ -478,6 +474,19 @@ export default function App({ user, onLogout }) {
       alert(`Couldn't load practice questions: ${e.message}`);
       setPyqStep("browse");
     }
+  }
+
+  function selectPyqSet(setNumber) {
+    setPyqSetNumber(setNumber);
+    setExpandedPyqIndex(null);
+    const key = `${exam}_${pyqSelection}_${pucYear}_${currentSubject.label}_${setNumber}`;
+    const stored = STORED_PYQ_PAPERS[key];
+    if (stored && stored.length > 0) {
+      setPyqList(stored);
+      setPyqStep("results");
+      return;
+    }
+    setPyqStep("unavailable");
   }
 
   function formatTimer(seconds) {
@@ -1031,7 +1040,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               onClick={() => {
                 if (item.key === "settings") setSettingsOpen(true);
                 else {
-                  if (item.key === "pyq") setPyqStep("puc");
+                  if (item.key === "pyq") { setPyqStep("puc"); setPyqSetNumber(""); }
                   setView(item.key);
                   if (isMobile) setSidebarOpen(false);
                 }
@@ -1202,7 +1211,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               {SUBJECTS.map((s) => (
                 <div
                   key={s.id}
-                  onClick={() => { setSubject(s.id); setPyqStep("puc"); }}
+                  onClick={() => { setSubject(s.id); setPyqStep("puc"); setPyqSetNumber(""); }}
                   style={{
                     width: isMobile ? 50 : 56, padding: isMobile ? "7px 5px" : "8px 5px", borderRadius: isMobile ? 9 : 10, textAlign: "center", cursor: "pointer",
                     background: subject === s.id ? `${s.color}14` : "#FFFFFF",
@@ -1790,12 +1799,38 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                     ← Back
                   </div>
                 </div>
+              ) : pyqStep === "sets" ? (
+                <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{pucYear} PUC · {currentSubject.label} · {exam} {pyqSelection}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Choose a set</div>
+                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>Each year is released as multiple question booklets — pick the set code.</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
+                    {["50", "60", "70", "80"].map((setNum) => (
+                      <div
+                        key={setNum}
+                        onClick={() => selectPyqSet(setNum)}
+                        style={{ padding: "13px 22px", borderRadius: 12, border: "1.5px solid #E4E2DA", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#2B2018" }}
+                      >
+                        Set {setNum}
+                      </div>
+                    ))}
+                  </div>
+                  <div onClick={() => setPyqStep("years")} style={{ marginTop: 20, fontSize: 12.5, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}>
+                    ← Back
+                  </div>
+                </div>
               ) : pyqStep === "unavailable" ? (
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 360 }}>
                   <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 14 }} />
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{pyqSelection} not added yet</div>
-                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>We haven't stored a real {currentSubject.label} paper for {pyqSelection} yet. Try another year, or browse by chapter instead.</div>
-                  <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{exam} {pyqSelection}{pyqSetNumber ? ` Set ${pyqSetNumber}` : ""} not added yet</div>
+                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>We haven't stored a real {currentSubject.label} paper for this one yet. Try another set or year, or browse by chapter instead.</div>
+                  <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => setPyqStep("sets")}
+                      style={{ padding: "11px 20px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}
+                    >
+                      ← Try Another Set
+                    </button>
                     <button
                       onClick={() => setPyqStep("years")}
                       style={{ padding: "11px 20px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}
@@ -1814,7 +1849,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", fontSize: 13.5 }}>Building {currentSubject.label} practice questions…</div>
               ) : (
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — {pyqSelectionType === "chapter" ? pyqSelection : `${exam} ${pyqSelection}`}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — {pyqSelectionType === "chapter" ? pyqSelection : `${exam} ${pyqSelection}${pyqSetNumber ? ` (Set ${pyqSetNumber})` : ""}`}</div>
                   <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>{pucYear} PUC · {exam} level · tap a question to reveal the answer and full solution</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
                     {pyqList.map((q, qi) => {
