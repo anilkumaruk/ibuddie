@@ -40,6 +40,9 @@ const GREEN = "#2F6B4A"; // landing page's checkmark green
 // hosted in the ibuddie-pyq GitHub repo. Keyed as `${exam}_${year}_${setNumber}`.
 const STORED_PDF_PAPERS = {
   "NEET_2026_50": "https://raw.githubusercontent.com/anilkumaruk/ibuddie-pyq/main/neet%202026%20set%2050.pdf",
+  "NEET_2026_60": "https://raw.githubusercontent.com/anilkumaruk/ibuddie-pyq/main/neet%202026%20set%2060.pdf",
+  "NEET_2026_70": "https://raw.githubusercontent.com/anilkumaruk/ibuddie-pyq/main/neet%202026%20set%2070.pdf",
+  "NEET_2026_80": "https://raw.githubusercontent.com/anilkumaruk/ibuddie-pyq/main/neet%202026%20set%2080.pdf",
 };
 
 const PUC_SYLLABUS = {
