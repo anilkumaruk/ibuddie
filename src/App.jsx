@@ -1725,14 +1725,20 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       onClick={() => setPyqStep("puc")}
                       style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
                     >
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>By Chapter</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018" }}>By Chapter</div>
+                        <span style={{ fontSize: 9.5, fontWeight: 800, color: "#8F6A08", background: "#B8860B1A", padding: "2px 8px", borderRadius: 999, letterSpacing: "0.02em" }}>AI GENERATED</span>
+                      </div>
                       <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Pick your class and a specific chapter to practice</div>
                     </div>
                     <div
                       onClick={() => setPyqStep("years")}
                       style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
                     >
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>By Year</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018" }}>By Year</div>
+                        <span style={{ fontSize: 9.5, fontWeight: 800, color: "#215038", background: "#2F6B4A1A", padding: "2px 8px", borderRadius: 999, letterSpacing: "0.02em" }}>REAL PAPERS</span>
+                      </div>
                       <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Real questions from a specific exam year and set (covers the full syllabus, not split by class)</div>
                     </div>
                   </div>
