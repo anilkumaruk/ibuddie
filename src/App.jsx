@@ -8,7 +8,7 @@ import {
   BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
-import { doc, getDoc, setDoc, updateDoc, increment } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "./Login.jsx";
 import { STORED_PYQ_PAPERS } from "./data/pyqPapers.js";
 import AvatarWidget from "./AvatarWidget.jsx";
@@ -120,14 +120,7 @@ export default function App({ user, onLogout }) {
   const [speakingIndex, setSpeakingIndex] = useState(null); // index of the assistant message currently reading aloud (loading OR playing)
   const [loadingIndex, setLoadingIndex] = useState(null); // index of the message whose Sarvam audio is still being generated (before playback actually starts)
   const [attachedImage, setAttachedImage] = useState(null); // { mediaType, data, previewUrl }
-  const [conversations, setConversations] = useState(() => {
-    try {
-      const saved = localStorage.getItem("ibuddie_conversations");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [conversations, setConversations] = useState([]); // loaded from Firestore once the user is known — see loadConversations effect
   const [selectedModel, setSelectedModel] = useState("haiku"); // "haiku" | "sonnet" (gemini paused for now)
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState(null); // index of the message whose Copy button was just clicked
@@ -191,6 +184,11 @@ export default function App({ user, onLogout }) {
           const title = firstUserMsg ? firstUserMsg.content.slice(0, 60) : "Untitled chat";
           const archived = { id: Date.now(), title, messages: prevMessages, subject: prevMessages[0]?.subject || "general", ts: Date.now() };
           setConversations((prev) => [archived, ...prev].slice(0, 30));
+          if (user?.uid) {
+            setDoc(doc(db, "users", user.uid, "conversations", String(archived.id)), archived).catch((e) =>
+              console.error("Failed to save leftover session to Firestore:", e)
+            );
+          }
         }
         localStorage.removeItem("ibuddie_messages");
       }
@@ -259,6 +257,22 @@ export default function App({ user, onLogout }) {
     loadUsage().catch((e) => console.error("Failed to load usage:", e));
   }, [user?.uid]);
 
+  // Loads the user's real archived conversation history from Firestore — durable across
+  // devices and browsers, replacing the old browser-only localStorage version.
+  useEffect(() => {
+    if (!user?.uid) return;
+    async function loadConversations() {
+      try {
+        const q = query(collection(db, "users", user.uid, "conversations"), orderBy("ts", "desc"), limit(30));
+        const snap = await getDocs(q);
+        setConversations(snap.docs.map((d) => d.data()));
+      } catch (e) {
+        console.error("Failed to load conversations from Firestore:", e);
+      }
+    }
+    loadConversations();
+  }, [user?.uid]);
+
 
   useEffect(() => {
     try {
@@ -268,20 +282,17 @@ export default function App({ user, onLogout }) {
     }
   }, [messages]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("ibuddie_conversations", JSON.stringify(conversations));
-    } catch {
-      // storage full or unavailable — ignore
-    }
-  }, [conversations]);
-
   function startNewChat() {
     if (messages.length > 0) {
       const firstUserMsg = messages.find((m) => m.role === "user");
       const title = firstUserMsg ? firstUserMsg.content.slice(0, 60) : "Untitled chat";
       const newConversation = { id: Date.now(), title, messages, subject, ts: Date.now() };
       setConversations((prev) => [newConversation, ...prev].slice(0, 30));
+      if (user?.uid) {
+        setDoc(doc(db, "users", user.uid, "conversations", String(newConversation.id)), newConversation).catch((e) =>
+          console.error("Failed to save conversation to Firestore:", e)
+        );
+      }
     }
     setMessages([]);
     setAttachedImage(null);
@@ -294,8 +305,21 @@ export default function App({ user, onLogout }) {
       const title = firstUserMsg ? firstUserMsg.content.slice(0, 60) : "Untitled chat";
       const current = { id: Date.now(), title, messages, subject, ts: Date.now() };
       setConversations((prev) => [current, ...prev.filter((c) => c.id !== conv.id)].slice(0, 30));
+      if (user?.uid) {
+        setDoc(doc(db, "users", user.uid, "conversations", String(current.id)), current).catch((e) =>
+          console.error("Failed to save conversation to Firestore:", e)
+        );
+        deleteDoc(doc(db, "users", user.uid, "conversations", String(conv.id))).catch((e) =>
+          console.error("Failed to remove reopened conversation from Firestore:", e)
+        );
+      }
     } else {
       setConversations((prev) => prev.filter((c) => c.id !== conv.id));
+      if (user?.uid) {
+        deleteDoc(doc(db, "users", user.uid, "conversations", String(conv.id))).catch((e) =>
+          console.error("Failed to remove reopened conversation from Firestore:", e)
+        );
+      }
     }
     setMessages(conv.messages);
     setSubject(conv.subject || "general");
@@ -2162,9 +2186,16 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   </div>
                 </div>
                 <div
-                  onClick={() => {
+                  onClick={async () => {
                     localStorage.removeItem("ibuddie_messages");
-                    localStorage.removeItem("ibuddie_conversations");
+                    if (user?.uid) {
+                      try {
+                        const snap = await getDocs(collection(db, "users", user.uid, "conversations"));
+                        await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+                      } catch (e) {
+                        console.error("Failed to clear conversations from Firestore:", e);
+                      }
+                    }
                     setMessages([]);
                     setConversations([]);
                     setSettingsOpen(false);
