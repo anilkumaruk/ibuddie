@@ -5,7 +5,7 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment } from "firebase/firestore";
@@ -69,6 +69,7 @@ const NAV_ITEMS = [
   { key: "mocktest", label: "Daily Mock Test", icon: Calendar },
   { key: "topics", label: "Important Topics", icon: BookMarked },
   { key: "pyq", label: "PYQ Bank", icon: FileQuestion },
+  { key: "studyplan", label: "Study Plan", icon: Target },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -151,6 +152,10 @@ export default function App({ user, onLogout }) {
   const [pyqSelection, setPyqSelection] = useState(""); // the chosen chapter name or year
   const [pyqSetNumber, setPyqSetNumber] = useState(""); // which NEET/JEE/KCET set code (50/60/70/80), for year-based browsing
   const [pyqBrowseMode, setPyqBrowseMode] = useState("questions"); // "questions" | "pdf" — which By Year sub-flow is active
+
+  const [studyExamDate, setStudyExamDate] = useState(() => localStorage.getItem("ibuddie_exam_date") || "");
+  const [studyPlanStep, setStudyPlanStep] = useState("setup"); // "setup" | "analysis" | "loading" | "plan"
+  const [studyPlan, setStudyPlan] = useState([]); // [{ day, date, focus }]
   const [pyqList, setPyqList] = useState([]);
   const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
@@ -510,6 +515,56 @@ export default function App({ user, onLogout }) {
       return;
     }
     setPyqStep("unavailable");
+  }
+
+  // Aggregates real topic/subject data already tagged on every Doubt Desk answer — no
+  // new tracking needed. More times a topic comes up = treated as a weaker area.
+  function analyzeWeakTopics() {
+    const allMessages = [...conversations.flatMap((c) => c.messages || []), ...messages];
+    const countsBySubject = {}; // { Physics: { "Kinematics": 3, ... }, ... }
+    for (const m of allMessages) {
+      if (m.role !== "assistant" || !m.topic || !m.subject || m.subject === "general") continue;
+      const subjLabel = SUBJECTS.find((s) => s.id === m.subject)?.label || m.subject;
+      if (!countsBySubject[subjLabel]) countsBySubject[subjLabel] = {};
+      countsBySubject[subjLabel][m.topic] = (countsBySubject[subjLabel][m.topic] || 0) + 1;
+    }
+    const result = {};
+    for (const subj of Object.keys(countsBySubject)) {
+      result[subj] = Object.entries(countsBySubject[subj])
+        .map(([topic, count]) => ({ topic, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5); // top 5 weakest per subject is plenty to act on
+    }
+    return result;
+  }
+
+  async function generateStudyPlan() {
+    const weakTopics = analyzeWeakTopics();
+    if (Object.keys(weakTopics).length === 0) return;
+    if (!canUseModel()) return;
+
+    setStudyPlanStep("loading");
+    try {
+      const today = new Date();
+      const target = new Date(studyExamDate);
+      const daysRemaining = Math.max(1, Math.ceil((target - today) / (1000 * 60 * 60 * 24)));
+
+      const res = await fetch("/api/study-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weakTopics, exam, daysRemaining, model: selectedModel }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.plan) throw new Error(data.error || `Server error (${res.status})`);
+
+      consumeUsage();
+      setStudyPlan(data.plan);
+      setStudyPlanStep("plan");
+    } catch (e) {
+      console.error(e);
+      alert(`Couldn't build your study plan: ${e.message}`);
+      setStudyPlanStep("analysis");
+    }
   }
 
   function formatTimer(seconds) {
@@ -1191,7 +1246,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -1962,6 +2017,115 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {view === "studyplan" && (
+            <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+              {!studyExamDate || studyPlanStep === "setup" ? (
+                <div style={{ margin: "auto", textAlign: "center", maxWidth: 360 }}>
+                  <Target size={28} color="#B8860B" style={{ marginBottom: 14 }} />
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Study Plan</div>
+                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>When is your {exam} exam?</div>
+                  <input
+                    type="date"
+                    value={studyExamDate}
+                    onChange={(e) => setStudyExamDate(e.target.value)}
+                    style={{ padding: "12px 16px", borderRadius: 10, border: "1.5px solid #E4E2DA", fontSize: 14, color: "#2B2018", marginBottom: 18 }}
+                  />
+                  <div>
+                    <button
+                      disabled={!studyExamDate}
+                      onClick={() => {
+                        localStorage.setItem("ibuddie_exam_date", studyExamDate);
+                        setStudyPlanStep("analysis");
+                      }}
+                      style={{ padding: "13px 26px", borderRadius: 12, border: "none", background: studyExamDate ? ACCENT : "#E4E2DA", color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: studyExamDate ? "pointer" : "not-allowed" }}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </div>
+              ) : studyPlanStep === "loading" ? (
+                <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", fontSize: 13.5 }}>Building your personalized study plan…</div>
+              ) : studyPlanStep === "plan" ? (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018" }}>Your {studyPlan.length}-Day Plan</div>
+                    <div
+                      onClick={() => { localStorage.removeItem("ibuddie_exam_date"); setStudyExamDate(""); setStudyPlanStep("setup"); }}
+                      style={{ fontSize: 12, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}
+                    >
+                      Change exam date
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>Built from your real doubt history — weak topics prioritized first</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+                    {studyPlan.map((d, i) => (
+                      <div key={i} style={{ display: "flex", gap: 14, padding: "14px 16px", borderRadius: 12, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
+                        <div style={{ width: 40, height: 40, borderRadius: 10, background: "#B8860B14", color: "#8F6A08", fontSize: 12, fontWeight: 800, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <div style={{ fontSize: 8, fontWeight: 700 }}>DAY</div>
+                          {d.day}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#8F6A08", marginBottom: 2, textTransform: "uppercase" }}>{d.subject}</div>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>{d.focus}</div>
+                          <div style={{ fontSize: 12, color: "#8C7D6B" }}>{d.note}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={generateStudyPlan}
+                    style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                  >
+                    <RotateCcw size={15} /> Regenerate Plan
+                  </button>
+                </div>
+              ) : (() => {
+                const weakTopics = analyzeWeakTopics();
+                const hasData = Object.keys(weakTopics).length > 0;
+                return (
+                  <div style={{ margin: "auto", textAlign: "center", maxWidth: 420 }}>
+                    <Target size={28} color="#B8860B" style={{ marginBottom: 14 }} />
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>
+                      {new Date(studyExamDate) > new Date()
+                        ? `${Math.max(1, Math.ceil((new Date(studyExamDate) - new Date()) / 86400000))} days until ${exam}`
+                        : "Exam date has passed"}
+                    </div>
+                    {!hasData ? (
+                      <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 6 }}>
+                        Ask a few doubts in Doubt Desk first — your study plan is built from the topics you've actually struggled with, and there's no history yet.
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 20 }}>Based on your real doubt history, here's what you've asked about most:</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24, textAlign: "left" }}>
+                          {Object.entries(weakTopics).map(([subj, topics]) => (
+                            <div key={subj}>
+                              <div style={{ fontSize: 11, fontWeight: 800, color: "#8F6A08", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>{subj}</div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                {topics.map((t) => (
+                                  <div key={t.topic} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: 8, background: "#F9F9F7", border: "1px solid #E4E2DA" }}>
+                                    <span style={{ fontSize: 12.5, color: "#2B2018" }}>{t.topic}</span>
+                                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8C7D6B" }}>asked {t.count}x</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          onClick={generateStudyPlan}
+                          style={{ padding: "13px 26px", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}
+                        >
+                          Generate My Study Plan
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
