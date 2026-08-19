@@ -137,7 +137,7 @@ export default function App({ user, onLogout }) {
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,
   });
   const [topicsState, setTopicsState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
-  const [pyqStep, setPyqStep] = useState("puc"); // "puc" | "browse" | "chapters" | "years" | "loading" | "results"
+  const [pyqStep, setPyqStep] = useState("browse"); // "puc" | "browse" | "chapters" | "years" | "sets" | "loading" | "results"
   const [pyqSelectionType, setPyqSelectionType] = useState(""); // "chapter" | "year"
   const [pyqSelection, setPyqSelection] = useState(""); // the chosen chapter name or year
   const [pyqSetNumber, setPyqSetNumber] = useState(""); // which NEET/JEE/KCET set code (50/60/70/80), for year-based browsing
@@ -479,7 +479,7 @@ export default function App({ user, onLogout }) {
   function selectPyqSet(setNumber) {
     setPyqSetNumber(setNumber);
     setExpandedPyqIndex(null);
-    const key = `${exam}_${pyqSelection}_${pucYear}_${currentSubject.label}_${setNumber}`;
+    const key = `${exam}_${pyqSelection}_${currentSubject.label}_${setNumber}`;
     const stored = STORED_PYQ_PAPERS[key];
     if (stored && stored.length > 0) {
       setPyqList(stored);
@@ -1040,7 +1040,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               onClick={() => {
                 if (item.key === "settings") setSettingsOpen(true);
                 else {
-                  if (item.key === "pyq") { setPyqStep("puc"); setPyqSetNumber(""); }
+                  if (item.key === "pyq") { setPyqStep("browse"); setPyqSetNumber(""); }
                   setView(item.key);
                   if (isMobile) setSidebarOpen(false);
                 }
@@ -1211,7 +1211,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               {SUBJECTS.map((s) => (
                 <div
                   key={s.id}
-                  onClick={() => { setSubject(s.id); setPyqStep("puc"); setPyqSetNumber(""); }}
+                  onClick={() => { setSubject(s.id); setPyqStep("browse"); setPyqSetNumber(""); }}
                   style={{
                     width: isMobile ? 50 : 56, padding: isMobile ? "7px 5px" : "8px 5px", borderRadius: isMobile ? 9 : 10, textAlign: "center", cursor: "pointer",
                     background: subject === s.id ? `${s.color}14` : "#FFFFFF",
@@ -1715,16 +1715,38 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 12 }} />
                   <div style={{ fontSize: 14.5 }}>Pick a subject (Physics, Chemistry, Biology, or Mathematics) from above to see practice questions.</div>
                 </div>
+              ) : pyqStep === "browse" ? (
+                <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
+                  <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 14 }} />
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{currentSubject.label} — PYQ Bank</div>
+                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>How do you want to browse?</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div
+                      onClick={() => setPyqStep("puc")}
+                      style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
+                    >
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>By Chapter</div>
+                      <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Pick your class and a specific chapter to practice</div>
+                    </div>
+                    <div
+                      onClick={() => setPyqStep("years")}
+                      style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
+                    >
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>By Year</div>
+                      <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Real questions from a specific exam year and set (covers the full syllabus, not split by class)</div>
+                    </div>
+                  </div>
+                </div>
               ) : pyqStep === "puc" ? (
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 360 }}>
                   <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 14 }} />
-                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{currentSubject.label} — PYQ Bank</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{currentSubject.label} — By Chapter</div>
                   <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>Which class are you in?</div>
                   <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
                     {[{ id: "1st", label: "1st PUC" }, { id: "2nd", label: "2nd PUC" }].map((p) => (
                       <div
                         key={p.id}
-                        onClick={() => { setPucYear(p.id); setPyqStep("browse"); }}
+                        onClick={() => { setPucYear(p.id); setPyqStep("chapters"); }}
                         style={{
                           padding: "14px 28px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 700,
                           border: "1.5px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018",
@@ -1734,29 +1756,8 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       </div>
                     ))}
                   </div>
-                </div>
-              ) : pyqStep === "browse" ? (
-                <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{pucYear} PUC · {currentSubject.label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 22 }}>How do you want to browse?</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    <div
-                      onClick={() => setPyqStep("chapters")}
-                      style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
-                    >
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>By Chapter</div>
-                      <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Pick a specific chapter to practice</div>
-                    </div>
-                    <div
-                      onClick={() => setPyqStep("years")}
-                      style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
-                    >
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>By Year</div>
-                      <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Practice in the style of a specific exam year (last 5 years)</div>
-                    </div>
-                  </div>
-                  <div onClick={() => setPyqStep("puc")} style={{ marginTop: 20, fontSize: 12.5, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}>
-                    ← Change class
+                  <div onClick={() => setPyqStep("browse")} style={{ marginTop: 20, fontSize: 12.5, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}>
+                    ← Back
                   </div>
                 </div>
               ) : pyqStep === "chapters" ? (
@@ -1775,13 +1776,13 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       </div>
                     ))}
                   </div>
-                  <div onClick={() => setPyqStep("browse")} style={{ marginTop: 18, fontSize: 12.5, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline", textAlign: "center" }}>
+                  <div onClick={() => setPyqStep("puc")} style={{ marginTop: 18, fontSize: 12.5, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline", textAlign: "center" }}>
                     ← Back
                   </div>
                 </div>
               ) : pyqStep === "years" ? (
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{pucYear} PUC · {currentSubject.label}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{currentSubject.label} · {exam}</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Choose a year</div>
                   <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>Real questions from that year's actual paper, where available.</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
@@ -1801,7 +1802,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 </div>
               ) : pyqStep === "sets" ? (
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{pucYear} PUC · {currentSubject.label} · {exam} {pyqSelection}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{currentSubject.label} · {exam} {pyqSelection}</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Choose a set</div>
                   <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>Each year is released as multiple question booklets — pick the set code.</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
@@ -1838,7 +1839,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       ← Try Another Year
                     </button>
                     <button
-                      onClick={() => setPyqStep("chapters")}
+                      onClick={() => setPyqStep("puc")}
                       style={{ padding: "11px 20px", borderRadius: 10, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}
                     >
                       Browse by Chapter
@@ -1850,7 +1851,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               ) : (
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — {pyqSelectionType === "chapter" ? pyqSelection : `${exam} ${pyqSelection}${pyqSetNumber ? ` (Set ${pyqSetNumber})` : ""}`}</div>
-                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>{pucYear} PUC · {exam} level · tap a question to reveal the answer and full solution</div>
+                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>{pyqSelectionType === "chapter" ? `${pucYear} PUC · ` : ""}{exam} level · tap a question to reveal the answer and full solution</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
                     {pyqList.map((q, qi) => {
                       const isOpen = expandedPyqIndex === qi;

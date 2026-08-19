@@ -8,7 +8,7 @@
 // stored content first, instead of always generating fresh AI practice questions.
 
 export const STORED_PYQ_PAPERS = {
-  "NEET_2026_2nd_Physics_50": [
+  "NEET_2026_Physics_50": [
     {
       topic: "Work-Energy Theorem",
       difficulty: "Medium",
@@ -371,7 +371,7 @@ export const STORED_PYQ_PAPERS = {
     },
   ],
 
-  "NEET_2026_2nd_Chemistry_50": [
+  "NEET_2026_Chemistry_50": [
     {
       topic: "Haloform Reaction",
       difficulty: "Hard",
@@ -734,7 +734,7 @@ export const STORED_PYQ_PAPERS = {
     },
   ],
 
-  "NEET_2026_2nd_Biology_50": [
+  "NEET_2026_Biology_50": [
     {
       topic: "Human Anatomy — Skeletal System",
       difficulty: "Easy",
