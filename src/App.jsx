@@ -36,6 +36,12 @@ const GREEN = "#2F6B4A"; // landing page's checkmark green
 // Standard Karnataka PUC / NCERT-aligned chapter lists, used for the PYQ Bank's
 // browse-by-chapter mode. Hardcoded rather than AI-generated since syllabus structure
 // is stable factual data, not something worth risking a generation failure over.
+// Direct links to the actual original PDF papers (unprocessed, exactly as printed),
+// hosted in the ibuddie-pyq GitHub repo. Keyed as `${exam}_${year}_${setNumber}`.
+const STORED_PDF_PAPERS = {
+  "NEET_2026_50": "https://raw.githubusercontent.com/anilkumaruk/ibuddie-pyq/main/neet%202026%20set%2050.pdf",
+};
+
 const PUC_SYLLABUS = {
   Physics: {
     "1st": ["Physical World and Measurement", "Kinematics", "Laws of Motion", "Work, Energy and Power", "Motion of System of Particles and Rigid Body", "Gravitation", "Mechanical Properties of Solids and Fluids", "Thermal Properties of Matter", "Thermodynamics", "Kinetic Theory", "Oscillations", "Waves"],
@@ -141,6 +147,7 @@ export default function App({ user, onLogout }) {
   const [pyqSelectionType, setPyqSelectionType] = useState(""); // "chapter" | "year"
   const [pyqSelection, setPyqSelection] = useState(""); // the chosen chapter name or year
   const [pyqSetNumber, setPyqSetNumber] = useState(""); // which NEET/JEE/KCET set code (50/60/70/80), for year-based browsing
+  const [pyqBrowseMode, setPyqBrowseMode] = useState("questions"); // "questions" | "pdf" — which By Year sub-flow is active
   const [pyqList, setPyqList] = useState([]);
   const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
@@ -479,6 +486,19 @@ export default function App({ user, onLogout }) {
   function selectPyqSet(setNumber) {
     setPyqSetNumber(setNumber);
     setExpandedPyqIndex(null);
+
+    if (pyqBrowseMode === "pdf") {
+      const pdfKey = `${exam}_${pyqSelection}_${setNumber}`;
+      const pdfUrl = STORED_PDF_PAPERS[pdfKey];
+      if (pdfUrl) {
+        window.open(pdfUrl, "_blank", "noopener,noreferrer");
+        setPyqStep("sets"); // stay on the set picker so they can open another one easily
+        return;
+      }
+      setPyqStep("unavailable");
+      return;
+    }
+
     const key = `${exam}_${pyqSelection}_${currentSubject.label}_${setNumber}`;
     const stored = STORED_PYQ_PAPERS[key];
     if (stored && stored.length > 0) {
@@ -1040,7 +1060,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               onClick={() => {
                 if (item.key === "settings") setSettingsOpen(true);
                 else {
-                  if (item.key === "pyq") { setPyqStep("browse"); setPyqSetNumber(""); }
+                  if (item.key === "pyq") { setPyqStep("browse"); setPyqSetNumber(""); setPyqBrowseMode("questions"); }
                   setView(item.key);
                   if (isMobile) setSidebarOpen(false);
                 }
@@ -1211,7 +1231,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               {SUBJECTS.map((s) => (
                 <div
                   key={s.id}
-                  onClick={() => { setSubject(s.id); setPyqStep("browse"); setPyqSetNumber(""); }}
+                  onClick={() => { setSubject(s.id); setPyqStep("browse"); setPyqSetNumber(""); setPyqBrowseMode("questions"); }}
                   style={{
                     width: isMobile ? 50 : 56, padding: isMobile ? "7px 5px" : "8px 5px", borderRadius: isMobile ? 9 : 10, textAlign: "center", cursor: "pointer",
                     background: subject === s.id ? `${s.color}14` : "#FFFFFF",
@@ -1732,7 +1752,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Pick your class and a specific chapter to practice</div>
                     </div>
                     <div
-                      onClick={() => setPyqStep("years")}
+                      onClick={() => { setPyqBrowseMode("questions"); setPyqStep("years"); }}
                       style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
@@ -1740,6 +1760,16 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                         <span style={{ fontSize: 9.5, fontWeight: 800, color: "#215038", background: "#2F6B4A1A", padding: "2px 8px", borderRadius: 999, letterSpacing: "0.02em" }}>REAL PAPERS</span>
                       </div>
                       <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Real questions from a specific exam year and set (covers the full syllabus, not split by class)</div>
+                    </div>
+                    <div
+                      onClick={() => { setPyqBrowseMode("pdf"); setPyqStep("years"); }}
+                      style={{ padding: "18px 20px", borderRadius: 14, border: "1.5px solid #E4E2DA", cursor: "pointer", textAlign: "left" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018" }}>View Original PDF</div>
+                        <span style={{ fontSize: 9.5, fontWeight: 800, color: "#1A4D6E", background: "#2B7FB01A", padding: "2px 8px", borderRadius: 999, letterSpacing: "0.02em" }}>EXACT PAPER</span>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>See the unprocessed paper exactly as printed, for a specific year and set</div>
                     </div>
                   </div>
                 </div>
@@ -1788,9 +1818,9 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 </div>
               ) : pyqStep === "years" ? (
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{currentSubject.label} · {exam}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{currentSubject.label} · {exam}{pyqBrowseMode === "pdf" ? " · Original PDF" : ""}</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Choose a year</div>
-                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>Real questions from that year's actual paper, where available.</div>
+                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>{pyqBrowseMode === "pdf" ? "Opens the real, unprocessed paper in a new tab." : "Real questions from that year's actual paper, where available."}</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
                     {[2026, 2025, 2024, 2023, 2022].map((yr) => (
                       <div
@@ -1808,9 +1838,9 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 </div>
               ) : pyqStep === "sets" ? (
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 380 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{currentSubject.label} · {exam} {pyqSelection}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", marginBottom: 8 }}>{currentSubject.label} · {exam} {pyqSelection}{pyqBrowseMode === "pdf" ? " · Original PDF" : ""}</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Choose a set</div>
-                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>Each year is released as multiple question booklets — pick the set code.</div>
+                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 20, fontStyle: "italic" }}>{pyqBrowseMode === "pdf" ? "Opens that booklet's PDF in a new tab." : "Each year is released as multiple question booklets — pick the set code."}</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
                     {["50", "60", "70", "80"].map((setNum) => (
                       <div
@@ -1830,7 +1860,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <div style={{ margin: "auto", textAlign: "center", maxWidth: 360 }}>
                   <FileQuestion size={28} color="#B8860B" style={{ marginBottom: 14 }} />
                   <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{exam} {pyqSelection}{pyqSetNumber ? ` Set ${pyqSetNumber}` : ""} not added yet</div>
-                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>We haven't stored a real {currentSubject.label} paper for this one yet. Try another set or year, or browse by chapter instead.</div>
+                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>{pyqBrowseMode === "pdf" ? "We haven't uploaded the original PDF for this one yet." : `We haven't stored a real ${currentSubject.label} paper for this one yet.`} Try another set or year, or browse by chapter instead.</div>
                   <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
                     <button
                       onClick={() => setPyqStep("sets")}
