@@ -5,7 +5,7 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
@@ -148,6 +148,7 @@ export default function App({ user, onLogout }) {
   const [selectedModel, setSelectedModel] = useState("haiku"); // "haiku" | "sonnet" (gemini paused for now)
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState(null); // index of the message whose Copy button was just clicked
+  const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [copiedCodeKey, setCopiedCodeKey] = useState(null); // "messageIndex-segmentIndex" of the code block just copied
   const [usageCounts, setUsageCounts] = useState({ gemini: 0, haiku: 0, sonnet: 0 });
   const [subscriptions, setSubscriptions] = useState({
@@ -1442,27 +1443,69 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
         {sidebarOpen && (
           <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid #DAD4C5", minHeight: 0, display: "flex", flexDirection: "column" }}>
             <div style={{ fontWeight: 700, fontSize: 12.5, color: "#8C7D6B", marginBottom: 12, letterSpacing: "0.03em", textTransform: "uppercase" }}>Chat History</div>
+            {conversations.length > 0 && (
+              <div style={{ position: "relative", marginBottom: 10 }}>
+                <Search size={13} color="#8C7D6B" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
+                <input
+                  type="text"
+                  value={historySearchQuery}
+                  onChange={(e) => setHistorySearchQuery(e.target.value)}
+                  placeholder="Search your past doubts…"
+                  style={{ width: "100%", padding: "7px 10px 7px 28px", borderRadius: 8, border: "1px solid #DAD4C5", fontSize: 11.5, color: "#2B2018", boxSizing: "border-box" }}
+                />
+              </div>
+            )}
             {conversations.length === 0 && <div style={{ fontSize: 11.5, color: "#8C7D6B" }}>Past chats will show up here once you start a new one.</div>}
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 280, overflowY: "auto" }}>
-              {conversations.map((conv) => {
-                const s = SUBJECTS.find((sub) => sub.id === conv.subject);
-                return (
-                  <div
-                    key={conv.id}
-                    onClick={() => { openConversation(conv); setView("doubt"); if (isMobile) setSidebarOpen(false); }}
-                    style={{ display: "flex", gap: 9, padding: "6px 4px", borderRadius: 8, cursor: "pointer" }}
-                  >
-                    <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(23,20,15,0.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {s ? <s.icon size={12} color="#17140F" /> : <MessageSquare size={12} color="#17140F" />}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11.5, fontWeight: 500, color: "#17140F", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.title}</div>
-                      <div style={{ fontSize: 10, color: "#8C7D6B" }}>{s?.label || "General"} · {timeAgo(conv.ts)}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            {(() => {
+              const q = historySearchQuery.trim().toLowerCase();
+              const results = q === "" ? conversations.map((conv) => ({ conv, snippet: null })) : conversations
+                .map((conv) => {
+                  if (conv.title.toLowerCase().includes(q)) return { conv, snippet: null };
+                  const hit = (conv.messages || []).find((m) =>
+                    (m.content && m.content.toLowerCase().includes(q)) ||
+                    (m.body && m.body.toLowerCase().includes(q)) ||
+                    (m.topic && m.topic.toLowerCase().includes(q))
+                  );
+                  if (!hit) return null;
+                  const text = hit.body || hit.content || hit.topic || "";
+                  const idx = text.toLowerCase().indexOf(q);
+                  const start = Math.max(0, idx - 25);
+                  const snippet = (start > 0 ? "…" : "") + text.slice(start, idx + q.length + 40) + "…";
+                  return { conv, snippet };
+                })
+                .filter(Boolean);
+
+              if (q !== "" && results.length === 0) {
+                return <div style={{ fontSize: 11.5, color: "#8C7D6B", padding: "6px 4px" }}>No past doubts match "{historySearchQuery}"</div>;
+              }
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 280, overflowY: "auto" }}>
+                  {results.map(({ conv, snippet }) => {
+                    const s = SUBJECTS.find((sub) => sub.id === conv.subject);
+                    return (
+                      <div
+                        key={conv.id}
+                        onClick={() => { openConversation(conv); setView("doubt"); setHistorySearchQuery(""); if (isMobile) setSidebarOpen(false); }}
+                        style={{ display: "flex", gap: 9, padding: "6px 4px", borderRadius: 8, cursor: "pointer" }}
+                      >
+                        <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(23,20,15,0.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          {s ? <s.icon size={12} color="#17140F" /> : <MessageSquare size={12} color="#17140F" />}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 500, color: "#17140F", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.title}</div>
+                          {snippet ? (
+                            <div style={{ fontSize: 10, color: "#8F6A08", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{snippet}</div>
+                          ) : (
+                            <div style={{ fontSize: 10, color: "#8C7D6B" }}>{s?.label || "General"} · {timeAgo(conv.ts)}</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
