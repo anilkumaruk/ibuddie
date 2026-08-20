@@ -139,6 +139,9 @@ export default function App({ user, onLogout }) {
     status: "setup", // "setup" | "loading" | "active" | "results"
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,
   });
+  const [mockTestMode, setMockTestMode] = useState("full"); // "full" | "chapter"
+  const [mockTestChapter, setMockTestChapter] = useState("");
+  const [mockTestPucYear, setMockTestPucYear] = useState("2nd"); // "1st" | "2nd" — only relevant for chapter mode
   const [mockTestHistory, setMockTestHistory] = useState([]); // real past attempts loaded from Firestore
   const [topicsState, setTopicsState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
   const [pyqStep, setPyqStep] = useState("browse"); // "puc" | "browse" | "chapters" | "years" | "sets" | "loading" | "results"
@@ -480,7 +483,13 @@ export default function App({ user, onLogout }) {
       const res = await fetch("/api/mock-test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: currentSubject.label, exam, count: mockTest.count, model: selectedModel }),
+        body: JSON.stringify({
+          subject: currentSubject.label,
+          exam,
+          count: mockTest.count,
+          model: selectedModel,
+          chapter: mockTestMode === "chapter" ? mockTestChapter : undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.questions) throw new Error(data.error || `Server error (${res.status})`);
@@ -515,7 +524,7 @@ export default function App({ user, onLogout }) {
         else if (q.topic) wrongTopics.push(q.topic);
       });
 
-      const result = { subject: currentSubject.label, exam, score, total: prev.questions.length, wrongTopics, ts: Date.now() };
+      const result = { subject: currentSubject.label, exam, score, total: prev.questions.length, wrongTopics, chapter: mockTestMode === "chapter" ? mockTestChapter : null, ts: Date.now() };
       setMockTestHistory((h) => [result, ...h].slice(0, 30));
 
       if (user?.uid) {
@@ -1433,7 +1442,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               {SUBJECTS.map((s) => (
                 <div
                   key={s.id}
-                  onClick={() => { setSubject(s.id); setPyqStep("browse"); setPyqSetNumber(""); setPyqBrowseMode("questions"); }}
+                  onClick={() => { setSubject(s.id); setPyqStep("browse"); setPyqSetNumber(""); setPyqBrowseMode("questions"); setMockTestChapter(""); }}
                   style={{
                     width: isMobile ? 50 : 56, padding: isMobile ? "7px 5px" : "8px 5px", borderRadius: isMobile ? 9 : 10, textAlign: "center", cursor: "pointer",
                     background: subject === s.id ? `${s.color}14` : "#FFFFFF",
@@ -1719,69 +1728,162 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   <Calendar size={28} color="#B8860B" style={{ marginBottom: 12 }} />
                   <div style={{ fontSize: 14.5 }}>Pick a subject (Physics, Chemistry, Biology, or Mathematics) from above to start a mock test.</div>
                 </div>
-              ) : mockTest.status === "setup" ? (
-                <div style={{ maxWidth: 420, margin: "0 auto", width: "100%" }}>
-                  <div style={{ textAlign: "center", marginBottom: mockTestHistory.length > 0 ? 32 : 0 }}>
-                    <Calendar size={28} color="#B8860B" style={{ marginBottom: 14 }} />
-                    <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{currentSubject.label} Mock Test</div>
-                    <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>{exam} level · timed · auto-scored</div>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8C7D6B", marginBottom: 10 }}>Number of questions</div>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 26 }}>
-                      {[5, 10, 15].map((n) => (
-                        <div
-                          key={n}
-                          onClick={() => setMockTest((prev) => ({ ...prev, count: n }))}
-                          style={{
-                            padding: "9px 18px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 700,
-                            border: mockTest.count === n ? "1.5px solid #B8860B" : "1.5px solid #E4E2DA",
-                            background: mockTest.count === n ? "#B8860B14" : "#FFFFFF",
-                            color: mockTest.count === n ? "#8F6A08" : "#2B2018",
-                          }}
-                        >
-                          {n}
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={startMockTest}
-                      style={{ width: "100%", padding: "13px 0", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-                    >
-                      <PlayCircle size={17} /> Start Test
-                    </button>
-                  </div>
+              ) : mockTest.status === "setup" ? (() => {
+                const totalTests = mockTestHistory.length;
+                const avgScore = totalTests > 0 ? Math.round(mockTestHistory.reduce((sum, r) => sum + (r.score / r.total) * 100, 0) / totalTests) : 0;
+                const bestResult = totalTests > 0 ? mockTestHistory.reduce((best, r) => ((r.score / r.total) > (best.score / best.total) ? r : best)) : null;
+                const bestPct = bestResult ? Math.round((bestResult.score / bestResult.total) * 100) : 0;
+                const subjectCounts = {};
+                for (const r of mockTestHistory) subjectCounts[r.subject] = (subjectCounts[r.subject] || 0) + 1;
+                const RING_R = 30, RING_C = 2 * Math.PI * 30;
 
-                  {mockTestHistory.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Your Recent Attempts</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {mockTestHistory.slice(0, 8).map((r, i) => {
-                          const pct = Math.round((r.score / r.total) * 100);
-                          return (
-                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
-                              <div style={{
-                                width: 40, height: 40, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 11, fontWeight: 800, color: "#fff",
-                                background: pct >= 70 ? "#2F6B4A" : pct >= 40 ? "#B8860B" : "#B23B3B",
-                              }}>
-                                {pct}%
-                              </div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{r.subject} · {r.score}/{r.total}</div>
-                                <div style={{ fontSize: 11, color: "#8C7D6B" }}>{new Date(r.ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
-                              </div>
-                              {r.wrongTopics && r.wrongTopics.length > 0 && (
-                                <div style={{ fontSize: 10.5, color: "#8C7D6B", textAlign: "right", maxWidth: 140 }}>
-                                  Missed: {r.wrongTopics.slice(0, 2).join(", ")}{r.wrongTopics.length > 2 ? "…" : ""}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                return (
+                  <div style={{ maxWidth: 480, margin: "0 auto", width: "100%" }}>
+                    {totalTests > 0 && (
+                      <div style={{ background: "linear-gradient(135deg, #B8860B, #8F6A08)", borderRadius: 16, padding: 20, marginBottom: 22, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+                        <div style={{ position: "relative", width: 76, height: 76, flexShrink: 0 }}>
+                          <svg width={76} height={76} style={{ transform: "rotate(-90deg)" }}>
+                            <circle cx={38} cy={38} r={RING_R} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={7} />
+                            <circle cx={38} cy={38} r={RING_R} fill="none" stroke="#fff" strokeWidth={7} strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={RING_C - (avgScore / 100) * RING_C} />
+                          </svg>
+                          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, color: "#fff" }}>{avgScore}%</div>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 160 }}>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: 600, marginBottom: 2 }}>Your Test Progress</div>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 4 }}>{totalTests} Tests Taken</div>
+                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.85)" }}>Average {avgScore}% · Best {bestPct}% ({bestResult.subject})</div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ textAlign: "center", marginBottom: 26 }}>
+                      <Calendar size={26} color="#B8860B" style={{ marginBottom: 10 }} />
+                      <div style={{ fontSize: 17, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} Mock Test</div>
+                      <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>{exam} level · timed · auto-scored</div>
+                    </div>
+
+                    {/* Mode selector */}
+                    <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+                      <div
+                        onClick={() => { setMockTestMode("full"); setMockTestChapter(""); }}
+                        style={{ flex: 1, padding: "14px 12px", borderRadius: 12, cursor: "pointer", textAlign: "center", border: mockTestMode === "full" ? `1.5px solid ${ACCENT}` : "1px solid #E4E2DA", background: mockTestMode === "full" ? "#B8860B0D" : "#FFFFFF" }}
+                      >
+                        <PlayCircle size={18} color="#8F6A08" style={{ marginBottom: 4 }} />
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#2B2018" }}>Full Syllabus</div>
+                        <div style={{ fontSize: 10.5, color: "#8C7D6B" }}>Mixed topics</div>
+                      </div>
+                      <div
+                        onClick={() => setMockTestMode("chapter")}
+                        style={{ flex: 1, padding: "14px 12px", borderRadius: 12, cursor: "pointer", textAlign: "center", border: mockTestMode === "chapter" ? `1.5px solid ${ACCENT}` : "1px solid #E4E2DA", background: mockTestMode === "chapter" ? "#B8860B0D" : "#FFFFFF" }}
+                      >
+                        <BookMarked size={18} color="#8F6A08" style={{ marginBottom: 4 }} />
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#2B2018" }}>Chapter Test</div>
+                        <div style={{ fontSize: 10.5, color: "#8C7D6B" }}>One chapter only</div>
                       </div>
                     </div>
-                  )}
-                </div>
-              ) : mockTest.status === "loading" ? (
+
+                    {mockTestMode === "chapter" && (
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 12 }}>
+                          {[{ id: "1st", label: "1st PUC" }, { id: "2nd", label: "2nd PUC" }].map((p) => (
+                            <div
+                              key={p.id}
+                              onClick={() => { setMockTestPucYear(p.id); setMockTestChapter(""); }}
+                              style={{ padding: "6px 16px", borderRadius: 999, cursor: "pointer", fontSize: 12.5, fontWeight: 700, border: mockTestPucYear === p.id ? "1.5px solid #B8860B" : "1px solid #E4E2DA", background: mockTestPucYear === p.id ? "#B8860B14" : "#FFFFFF", color: mockTestPucYear === p.id ? "#8F6A08" : "#2B2018" }}
+                            >
+                              {p.label}
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+                          {(PUC_SYLLABUS[currentSubject.label]?.[mockTestPucYear] || []).map((chapter) => (
+                            <div
+                              key={chapter}
+                              onClick={() => setMockTestChapter(chapter)}
+                              style={{ padding: "10px 14px", borderRadius: 9, cursor: "pointer", fontSize: 12.5, border: mockTestChapter === chapter ? "1.5px solid #B8860B" : "1px solid #E4E2DA", background: mockTestChapter === chapter ? "#B8860B14" : "#F9F9F7", color: "#2B2018" }}
+                            >
+                              {chapter}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ textAlign: "center", marginBottom: mockTestHistory.length > 0 ? 32 : 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8C7D6B", marginBottom: 10 }}>Number of questions</div>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 26 }}>
+                        {[5, 10, 15].map((n) => (
+                          <div
+                            key={n}
+                            onClick={() => setMockTest((prev) => ({ ...prev, count: n }))}
+                            style={{
+                              padding: "9px 18px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 700,
+                              border: mockTest.count === n ? "1.5px solid #B8860B" : "1.5px solid #E4E2DA",
+                              background: mockTest.count === n ? "#B8860B14" : "#FFFFFF",
+                              color: mockTest.count === n ? "#8F6A08" : "#2B2018",
+                            }}
+                          >
+                            {n}
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        onClick={startMockTest}
+                        disabled={mockTestMode === "chapter" && !mockTestChapter}
+                        style={{ width: "100%", padding: "13px 0", borderRadius: 12, border: "none", background: (mockTestMode === "chapter" && !mockTestChapter) ? "#E4E2DA" : ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: (mockTestMode === "chapter" && !mockTestChapter) ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                      >
+                        <PlayCircle size={17} /> Start Test
+                      </button>
+                    </div>
+
+                    {Object.keys(subjectCounts).length > 0 && (
+                      <div style={{ marginBottom: 32 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Your Tests by Subject</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {SUBJECTS.filter((s) => s.id !== "general").map((s) => (
+                            <div key={s.id} style={{ flex: "1 1 100px", padding: "12px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#F9F9F7", textAlign: "center" }}>
+                              <s.icon size={16} color={s.color} style={{ marginBottom: 4 }} />
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "#2B2018" }}>{s.label}</div>
+                              <div style={{ fontSize: 10.5, color: "#8C7D6B" }}>{subjectCounts[s.label] || 0} taken</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {mockTestHistory.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Your Recent Attempts</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {mockTestHistory.slice(0, 8).map((r, i) => {
+                            const pct = Math.round((r.score / r.total) * 100);
+                            return (
+                              <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
+                                <div style={{
+                                  width: 40, height: 40, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                                  fontSize: 11, fontWeight: 800, color: "#fff",
+                                  background: pct >= 70 ? "#2F6B4A" : pct >= 40 ? "#B8860B" : "#B23B3B",
+                                }}>
+                                  {pct}%
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{r.subject}{r.chapter ? ` · ${r.chapter}` : ""} · {r.score}/{r.total}</div>
+                                  <div style={{ fontSize: 11, color: "#8C7D6B" }}>{new Date(r.ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+                                </div>
+                                {r.wrongTopics && r.wrongTopics.length > 0 && (
+                                  <div style={{ fontSize: 10.5, color: "#8C7D6B", textAlign: "right", maxWidth: 140 }}>
+                                    Missed: {r.wrongTopics.slice(0, 2).join(", ")}{r.wrongTopics.length > 2 ? "…" : ""}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })() : mockTest.status === "loading" ? (
                 <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", fontSize: 13.5 }}>Building your {currentSubject.label} test…</div>
               ) : mockTest.status === "active" ? (
                 <div>

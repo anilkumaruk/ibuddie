@@ -7,12 +7,15 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
   }
 
-  const { subject, exam, count, model } = await req.json();
+  const { subject, exam, count, model, chapter } = await req.json();
   const n = Math.min(Math.max(parseInt(count, 10) || 5, 3), 15);
   const modelId = model === "sonnet" ? "claude-sonnet-5" : "claude-haiku-4-5-20251001";
 
+  const scopeLine = chapter ? `Every question must come specifically from the chapter "${chapter}" — do not include questions from any other chapter.` : "";
+
   const systemPrompt = `You are a question-generator for iBuddie, an exam-prep app for Indian students.
 Generate exactly ${n} multiple-choice questions for the subject "${subject}" at the difficulty and syllabus level of the Indian ${exam} exam.
+${scopeLine}
 Respond with ONLY a raw JSON array — no markdown code fences, no commentary, no text before or after it. Each item must have exactly this shape:
 {"question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "...", "topic": "short topic name, e.g. 'Kinematics'"}
 correctIndex is the 0-based index (0-3) of the correct option in "options". Keep each question and option concise (under 25 words). Vary which option is correct across questions — don't always put it first. Vary the topic across questions where the subject allows it.`;
