@@ -14,8 +14,8 @@ export default async function handler(req) {
   const systemPrompt = `You are a question-generator for iBuddie, an exam-prep app for Indian students.
 Generate exactly ${n} multiple-choice questions for the subject "${subject}" at the difficulty and syllabus level of the Indian ${exam} exam.
 Respond with ONLY a raw JSON array — no markdown code fences, no commentary, no text before or after it. Each item must have exactly this shape:
-{"question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "..."}
-correctIndex is the 0-based index (0-3) of the correct option in "options". Keep each question and option concise (under 25 words). Vary which option is correct across questions — don't always put it first.`;
+{"question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "...", "topic": "short topic name, e.g. 'Kinematics'"}
+correctIndex is the 0-based index (0-3) of the correct option in "options". Keep each question and option concise (under 25 words). Vary which option is correct across questions — don't always put it first. Vary the topic across questions where the subject allows it.`;
 
   try {
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {

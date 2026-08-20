@@ -139,6 +139,7 @@ export default function App({ user, onLogout }) {
     status: "setup", // "setup" | "loading" | "active" | "results"
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,
   });
+  const [mockTestHistory, setMockTestHistory] = useState([]); // real past attempts loaded from Firestore
   const [topicsState, setTopicsState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
   const [pyqStep, setPyqStep] = useState("browse"); // "puc" | "browse" | "chapters" | "years" | "sets" | "loading" | "results"
   const [pyqSelectionType, setPyqSelectionType] = useState(""); // "chapter" | "year"
@@ -297,6 +298,22 @@ export default function App({ user, onLogout }) {
       }
     }
     migrateThenLoadConversations();
+  }, [user?.uid]);
+
+  // Loads real past mock test attempts — used both to show the student their own history
+  // and to feed wrong-answer topics into weak-topic detection for the Study Plan.
+  useEffect(() => {
+    if (!user?.uid) return;
+    async function loadMockTestHistory() {
+      try {
+        const q = query(collection(db, "users", user.uid, "mockTestResults"), orderBy("ts", "desc"), limit(30));
+        const snap = await getDocs(q);
+        setMockTestHistory(snap.docs.map((d) => d.data()));
+      } catch (e) {
+        console.error("Failed to load mock test history from Firestore:", e);
+      }
+    }
+    loadMockTestHistory();
   }, [user?.uid]);
 
   // Loads any previously-generated study plan so it survives navigation/refresh — no
@@ -492,9 +509,21 @@ export default function App({ user, onLogout }) {
   function finishMockTest() {
     setMockTest((prev) => {
       let score = 0;
+      const wrongTopics = [];
       prev.questions.forEach((q, i) => {
         if (prev.answers[i] === q.correctIndex) score++;
+        else if (q.topic) wrongTopics.push(q.topic);
       });
+
+      const result = { subject: currentSubject.label, exam, score, total: prev.questions.length, wrongTopics, ts: Date.now() };
+      setMockTestHistory((h) => [result, ...h].slice(0, 30));
+
+      if (user?.uid) {
+        addDoc(collection(db, "users", user.uid, "mockTestResults"), result).catch((e) =>
+          console.error("Failed to save mock test result:", e)
+        );
+      }
+
       return { ...prev, status: "results", score };
     });
   }
@@ -605,6 +634,16 @@ export default function App({ user, onLogout }) {
       if (!countsBySubject[subjLabel]) countsBySubject[subjLabel] = {};
       countsBySubject[subjLabel][m.topic] = (countsBySubject[subjLabel][m.topic] || 0) + 1;
     }
+    // Mock test wrong answers are a more direct signal of weakness than just asking about a
+    // topic — weight each wrong answer as 2x a doubt, since it's confirmed you got it wrong
+    // rather than just being curious about it.
+    for (const result of mockTestHistory) {
+      if (!result.subject || !result.wrongTopics) continue;
+      if (!countsBySubject[result.subject]) countsBySubject[result.subject] = {};
+      for (const topic of result.wrongTopics) {
+        countsBySubject[result.subject][topic] = (countsBySubject[result.subject][topic] || 0) + 2;
+      }
+    }
     const result = {};
     for (const subj of Object.keys(countsBySubject)) {
       result[subj] = Object.entries(countsBySubject[subj])
@@ -636,14 +675,15 @@ export default function App({ user, onLogout }) {
 
       consumeUsage();
       const generatedAt = Date.now();
-      setStudyPlan(data.plan);
+      const normalizedPlan = data.plan.map((d, idx) => ({ ...d, day: idx + 1 })); // never trust the model's own day numbering — always derive from position
+      setStudyPlan(normalizedPlan);
       setStudyPlanGeneratedAt(generatedAt);
       setStudyPlanCompletedTasks({});
       setSelectedStudyDay(1); // freshly generated plan starts at day 1 (today)
       setStudyPlanStep("plan");
       if (user?.uid) {
         setDoc(doc(db, "users", user.uid, "studyPlan", "current"), {
-          plan: data.plan,
+          plan: normalizedPlan,
           examDate: studyExamDate,
           generatedAt,
           completedTasks: {},
@@ -1680,33 +1720,66 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   <div style={{ fontSize: 14.5 }}>Pick a subject (Physics, Chemistry, Biology, or Mathematics) from above to start a mock test.</div>
                 </div>
               ) : mockTest.status === "setup" ? (
-                <div style={{ margin: "auto", textAlign: "center", maxWidth: 360 }}>
-                  <Calendar size={28} color="#B8860B" style={{ marginBottom: 14 }} />
-                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{currentSubject.label} Mock Test</div>
-                  <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>{exam} level · timed · auto-scored</div>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8C7D6B", marginBottom: 10 }}>Number of questions</div>
-                  <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 26 }}>
-                    {[5, 10, 15].map((n) => (
-                      <div
-                        key={n}
-                        onClick={() => setMockTest((prev) => ({ ...prev, count: n }))}
-                        style={{
-                          padding: "9px 18px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 700,
-                          border: mockTest.count === n ? "1.5px solid #B8860B" : "1.5px solid #E4E2DA",
-                          background: mockTest.count === n ? "#B8860B14" : "#FFFFFF",
-                          color: mockTest.count === n ? "#8F6A08" : "#2B2018",
-                        }}
-                      >
-                        {n}
-                      </div>
-                    ))}
+                <div style={{ maxWidth: 420, margin: "0 auto", width: "100%" }}>
+                  <div style={{ textAlign: "center", marginBottom: mockTestHistory.length > 0 ? 32 : 0 }}>
+                    <Calendar size={28} color="#B8860B" style={{ marginBottom: 14 }} />
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{currentSubject.label} Mock Test</div>
+                    <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>{exam} level · timed · auto-scored</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8C7D6B", marginBottom: 10 }}>Number of questions</div>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 26 }}>
+                      {[5, 10, 15].map((n) => (
+                        <div
+                          key={n}
+                          onClick={() => setMockTest((prev) => ({ ...prev, count: n }))}
+                          style={{
+                            padding: "9px 18px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 700,
+                            border: mockTest.count === n ? "1.5px solid #B8860B" : "1.5px solid #E4E2DA",
+                            background: mockTest.count === n ? "#B8860B14" : "#FFFFFF",
+                            color: mockTest.count === n ? "#8F6A08" : "#2B2018",
+                          }}
+                        >
+                          {n}
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={startMockTest}
+                      style={{ width: "100%", padding: "13px 0", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                    >
+                      <PlayCircle size={17} /> Start Test
+                    </button>
                   </div>
-                  <button
-                    onClick={startMockTest}
-                    style={{ width: "100%", padding: "13px 0", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-                  >
-                    <PlayCircle size={17} /> Start Test
-                  </button>
+
+                  {mockTestHistory.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Your Recent Attempts</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {mockTestHistory.slice(0, 8).map((r, i) => {
+                          const pct = Math.round((r.score / r.total) * 100);
+                          return (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
+                              <div style={{
+                                width: 40, height: 40, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                                fontSize: 11, fontWeight: 800, color: "#fff",
+                                background: pct >= 70 ? "#2F6B4A" : pct >= 40 ? "#B8860B" : "#B23B3B",
+                              }}>
+                                {pct}%
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{r.subject} · {r.score}/{r.total}</div>
+                                <div style={{ fontSize: 11, color: "#8C7D6B" }}>{new Date(r.ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+                              </div>
+                              {r.wrongTopics && r.wrongTopics.length > 0 && (
+                                <div style={{ fontSize: 10.5, color: "#8C7D6B", textAlign: "right", maxWidth: 140 }}>
+                                  Missed: {r.wrongTopics.slice(0, 2).join(", ")}{r.wrongTopics.length > 2 ? "…" : ""}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : mockTest.status === "loading" ? (
                 <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", fontSize: 13.5 }}>Building your {currentSubject.label} test…</div>
@@ -2292,7 +2365,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                         <Target size={22} color="#B8860B" style={{ flexShrink: 0 }} />
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{focusEntry[1][0]?.topic}</div>
-                          <div style={{ fontSize: 11.5, color: "#8C7D6B" }}>You're weakest here — asked about it {focusEntry[1][0]?.count}x</div>
+                          <div style={{ fontSize: 11.5, color: "#8C7D6B" }}>You're weakest here — based on your doubts and mock test results</div>
                         </div>
                         <button
                           onClick={() => {
@@ -2355,7 +2428,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                                 {topics.map((t) => (
                                   <div key={t.topic} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: 8, background: "#F9F9F7", border: "1px solid #E4E2DA" }}>
                                     <span style={{ fontSize: 12.5, color: "#2B2018" }}>{t.topic}</span>
-                                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8C7D6B" }}>asked {t.count}x</span>
+                                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8C7D6B" }}>weakness score: {t.count}</span>
                                   </div>
                                 ))}
                               </div>
