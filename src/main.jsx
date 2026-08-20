@@ -4,6 +4,7 @@ import { signOut, onAuthStateChanged } from "firebase/auth";
 import App from "./App.jsx";
 import Login, { auth } from "./Login.jsx";
 import "./index.css";
+import "./firebase";
 
 function Root() {
   const [user, setUser] = useState(null);
