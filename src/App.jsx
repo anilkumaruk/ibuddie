@@ -1412,13 +1412,28 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           {sidebarOpen ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 6px", marginBottom: 26, justifyContent: sidebarOpen ? "flex-start" : "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 6px", marginBottom: sidebarOpen ? 8 : 26, justifyContent: sidebarOpen ? "flex-start" : "center" }}>
           {sidebarOpen ? (
             <span style={{ fontSize: 22, fontWeight: 800, color: "#17140F" }}>i<span style={{ color: "#B8860B" }}>Buddie</span></span>
           ) : (
             <span style={{ fontSize: 20, fontWeight: 800, color: "#17140F" }}>i</span>
           )}
         </div>
+
+        {sidebarOpen && MODEL_ORDER.some((k) => subscriptions[k]?.active) && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0 6px", marginBottom: 18 }}>
+            {MODEL_ORDER.filter((k) => subscriptions[k]?.active).map((k) => (
+              <div
+                key={k}
+                onClick={() => setSettingsOpen(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#B8860B14", border: "1px solid #B8860B33", borderRadius: 999, padding: "3px 10px", cursor: "pointer", width: "fit-content" }}
+              >
+                <Crown size={11} color="#B8860B" />
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#8F6A08" }}>iBuddie {MODELS[k].label}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           {NAV_ITEMS.map((item) => (
@@ -1554,18 +1569,6 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
-              {!isMobile && MODEL_ORDER.some((k) => subscriptions[k]?.active) && (
-                <div
-                  onClick={() => setSettingsOpen(true)}
-                  style={{ display: "flex", alignItems: "center", gap: 6, background: "#FFFFFF", padding: "5px 12px", borderRadius: 999, boxShadow: "0 1px 4px rgba(20,15,5,0.25)", cursor: "pointer" }}
-                >
-                  {MODEL_ORDER.filter((k) => subscriptions[k]?.active).map((k) => (
-                    <span key={k} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, fontWeight: 700, color: "#2B2018" }}>
-                      <Crown size={11} color="#B8860B" /> iBuddie {MODELS[k].label}
-                    </span>
-                  ))}
-                </div>
-              )}
               {user?.uid && (
                 <div
                   onClick={() => setAchievementsOpen(true)}
