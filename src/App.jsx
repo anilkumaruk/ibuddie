@@ -259,11 +259,34 @@ export default function App({ user, onLogout }) {
     loadUsage().catch((e) => console.error("Failed to load usage:", e));
   }, [user?.uid]);
 
-  // Loads the user's real archived conversation history from Firestore — durable across
-  // devices and browsers, replacing the old browser-only localStorage version.
+  // One-time recovery: if this browser has old, pre-migration conversation history sitting
+  // in localStorage that was never carried over to Firestore, import it now so it isn't
+  // lost — then load the (now-complete) conversation list from Firestore. Sequenced in one
+  // effect so the load always happens after any recovery finishes, never racing it.
   useEffect(() => {
     if (!user?.uid) return;
-    async function loadConversations() {
+    async function migrateThenLoadConversations() {
+      const alreadyMigrated = localStorage.getItem("ibuddie_conversations_migrated");
+      if (!alreadyMigrated) {
+        try {
+          const saved = localStorage.getItem("ibuddie_conversations");
+          const oldConversations = saved ? JSON.parse(saved) : [];
+          if (oldConversations.length > 0) {
+            await Promise.all(
+              oldConversations.map((c) =>
+                setDoc(doc(db, "users", user.uid, "conversations", String(c.id)), c).catch((e) =>
+                  console.error("Failed to migrate a conversation:", e)
+                )
+              )
+            );
+            console.log(`Recovered ${oldConversations.length} pre-migration conversation(s) into Firestore.`);
+          }
+          localStorage.setItem("ibuddie_conversations_migrated", "true");
+        } catch (e) {
+          console.error("Local history recovery failed:", e);
+        }
+      }
+
       try {
         const q = query(collection(db, "users", user.uid, "conversations"), orderBy("ts", "desc"), limit(30));
         const snap = await getDocs(q);
@@ -272,7 +295,7 @@ export default function App({ user, onLogout }) {
         console.error("Failed to load conversations from Firestore:", e);
       }
     }
-    loadConversations();
+    migrateThenLoadConversations();
   }, [user?.uid]);
 
   // Loads any previously-generated study plan so it survives navigation/refresh — no
@@ -2212,14 +2235,27 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               ) : (() => {
                 const weakTopics = analyzeWeakTopics();
                 const hasData = Object.keys(weakTopics).length > 0;
+                const examHasPassed = new Date(studyExamDate) <= new Date();
                 return (
                   <div style={{ margin: "auto", textAlign: "center", maxWidth: 420 }}>
                     <Target size={28} color="#B8860B" style={{ marginBottom: 14 }} />
                     <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>
-                      {new Date(studyExamDate) > new Date()
-                        ? `${Math.max(1, Math.ceil((new Date(studyExamDate) - new Date()) / 86400000))} days until ${exam}`
-                        : "Exam date has passed"}
+                      {examHasPassed
+                        ? "Exam date has passed"
+                        : `${Math.max(1, Math.ceil((new Date(studyExamDate) - new Date()) / 86400000))} days until ${exam}`}
                     </div>
+                    {examHasPassed && (
+                      <div
+                        onClick={() => {
+                          localStorage.removeItem("ibuddie_exam_date");
+                          setStudyExamDate("");
+                          setStudyPlanStep("setup");
+                        }}
+                        style={{ fontSize: 12.5, color: "#8F6A08", fontWeight: 700, cursor: "pointer", textDecoration: "underline", marginBottom: 18 }}
+                      >
+                        Update your exam date →
+                      </div>
+                    )}
                     {!hasData ? (
                       <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 6 }}>
                         Ask a few doubts in Doubt Desk first — your study plan is built from the topics you've actually struggled with, and there's no history yet.
@@ -2242,12 +2278,14 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                             </div>
                           ))}
                         </div>
-                        <button
-                          onClick={generateStudyPlan}
-                          style={{ padding: "13px 26px", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}
-                        >
-                          Generate My Study Plan
-                        </button>
+                        {!examHasPassed && (
+                          <button
+                            onClick={generateStudyPlan}
+                            style={{ padding: "13px 26px", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}
+                          >
+                            Generate My Study Plan
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
