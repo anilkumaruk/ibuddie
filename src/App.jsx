@@ -5,7 +5,7 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
@@ -842,8 +842,8 @@ export default function App({ user, onLogout }) {
     return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
-  async function sendMessage() {
-    const question = input.trim();
+  async function sendMessage(overrideQuestion, displayText) {
+    const question = (overrideQuestion ?? input).trim();
     if ((!question && !attachedImage) || loading) return;
 
     const modelConfig = MODELS[selectedModel];
@@ -866,7 +866,7 @@ export default function App({ user, onLogout }) {
     setAttachedImage(null);
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: question || "(sent an image)", imagePreview: imageForSend?.previewUrl, subject, exam, model: selectedModel, ts: Date.now() },
+      { role: "user", content: displayText || question || "(sent an image)", imagePreview: imageForSend?.previewUrl, subject, exam, model: selectedModel, ts: Date.now() },
     ]);
     setLoading(true);
 
@@ -938,6 +938,17 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
       e.preventDefault();
       sendMessage();
     }
+  }
+
+  // The backend is stateless (each question is independent, no memory of prior turns), so
+  // this builds a self-contained prompt including both the original question and what was
+  // already explained, so the AI can genuinely try a different angle instead of repeating itself.
+  function explainDifferently(assistantIndex) {
+    const originalQuestion = messages[assistantIndex - 1]?.content;
+    const previousAnswer = messages[assistantIndex]?.body;
+    if (!originalQuestion || !previousAnswer || loading) return;
+    const prompt = `I asked: "${originalQuestion}"\n\nYou explained: "${previousAnswer.slice(0, 600)}"\n\nI still don't fully understand — can you explain this again in a different way? Try a simpler analogy or break it into smaller steps, don't just repeat the same explanation.`;
+    sendMessage(prompt, "Can you explain that differently? I'm still confused.");
   }
 
   function handleFileSelected(e) {
@@ -1703,6 +1714,16 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                             </>
                           )}
                         </div>
+                        {m.body && (
+                          <div
+                            onClick={() => explainDifferently(i)}
+                            title="Get a different explanation"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "4px 6px", borderRadius: 6, cursor: loading ? "default" : "pointer", color: loading ? "#C9C3B8" : "#8C7D6B", fontSize: 11.5 }}
+                          >
+                            <HelpCircle size={13} />
+                            <span>Still confused?</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )
