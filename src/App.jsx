@@ -151,6 +151,7 @@ export default function App({ user, onLogout }) {
   const [studyPlan, setStudyPlan] = useState([]); // [{ day, date, focus }]
   const [studyPlanGeneratedAt, setStudyPlanGeneratedAt] = useState(null); // timestamp — used to figure out which plan "day" is today
   const [studyPlanCompletedDays, setStudyPlanCompletedDays] = useState([]); // array of completed day numbers
+  const [expandedStudyDay, setExpandedStudyDay] = useState(null); // which day card is expanded to show its task breakdown
   const [pyqList, setPyqList] = useState([]);
   const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
@@ -2188,39 +2189,64 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       const daysSinceGenerated = studyPlanGeneratedAt ? Math.floor((Date.now() - studyPlanGeneratedAt) / 86400000) + 1 : null;
                       const isToday = daysSinceGenerated === d.day;
                       const isDone = studyPlanCompletedDays.includes(d.day);
+                      const isExpanded = expandedStudyDay === null ? isToday : expandedStudyDay === d.day;
                       return (
                         <div
                           key={i}
                           style={{
-                            display: "flex", gap: 14, padding: "14px 16px", borderRadius: 12,
+                            borderRadius: 12, overflow: "hidden",
                             border: isToday ? `1.5px solid ${ACCENT}` : "1px solid #E4E2DA",
-                            background: isToday ? "#B8860B0D" : isDone ? "#F2F2F0" : "#F9F9F7",
-                            opacity: isDone ? 0.7 : 1,
                           }}
                         >
                           <div
-                            onClick={() => toggleStudyDayComplete(d.day)}
                             style={{
-                              width: 40, height: 40, borderRadius: 10, flexShrink: 0, cursor: "pointer",
-                              background: isDone ? "#2F6B4A" : "#B8860B14", color: isDone ? "#fff" : "#8F6A08",
-                              fontSize: 12, fontWeight: 800, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                              display: "flex", gap: 14, padding: "14px 16px", cursor: "pointer",
+                              background: isToday ? "#B8860B0D" : isDone ? "#F2F2F0" : "#F9F9F7",
+                              opacity: isDone ? 0.7 : 1,
                             }}
+                            onClick={() => setExpandedStudyDay(isExpanded ? -1 : d.day)}
                           >
-                            {isDone ? <CheckCircle2 size={18} /> : (
-                              <>
-                                <div style={{ fontSize: 8, fontWeight: 700 }}>DAY</div>
-                                {d.day}
-                              </>
-                            )}
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: "#8F6A08", textTransform: "uppercase" }}>{d.subject}</div>
-                              {isToday && !isDone && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: ACCENT, padding: "1px 7px", borderRadius: 999 }}>TODAY</span>}
+                            <div
+                              onClick={(e) => { e.stopPropagation(); toggleStudyDayComplete(d.day); }}
+                              style={{
+                                width: 40, height: 40, borderRadius: 10, flexShrink: 0, cursor: "pointer",
+                                background: isDone ? "#2F6B4A" : "#B8860B14", color: isDone ? "#fff" : "#8F6A08",
+                                fontSize: 12, fontWeight: 800, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                              }}
+                            >
+                              {isDone ? <CheckCircle2 size={18} /> : (
+                                <>
+                                  <div style={{ fontSize: 8, fontWeight: 700 }}>DAY</div>
+                                  {d.day}
+                                </>
+                              )}
                             </div>
-                            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#2B2018", marginBottom: 3, textDecoration: isDone ? "line-through" : "none" }}>{d.focus}</div>
-                            <div style={{ fontSize: 12, color: "#8C7D6B" }}>{d.note}</div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: "#8F6A08", textTransform: "uppercase" }}>{d.subject}</div>
+                                {isToday && !isDone && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: ACCENT, padding: "1px 7px", borderRadius: 999 }}>TODAY</span>}
+                                {d.difficulty && <span style={{ fontSize: 9, fontWeight: 700, color: "#8C7D6B", background: "#FFFFFF", border: "1px solid #E4E2DA", padding: "1px 7px", borderRadius: 999 }}>{d.difficulty}</span>}
+                              </div>
+                              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#2B2018", marginBottom: 2, textDecoration: isDone ? "line-through" : "none" }}>{d.topic || d.focus}</div>
+                              {d.timeEstimate && <div style={{ fontSize: 11, color: "#8C7D6B" }}>~{d.timeEstimate}</div>}
+                            </div>
+                            <ChevronDown size={16} color="#8C7D6B" style={{ flexShrink: 0, marginTop: 3, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }} />
                           </div>
+                          {isExpanded && (
+                            <div style={{ padding: "0 16px 16px 70px" }}>
+                              {d.tasks && d.tasks.length > 0 && (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                                  {d.tasks.map((task, ti) => (
+                                    <div key={ti} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, color: "#2B2018" }}>
+                                      <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#B8860B", marginTop: 6, flexShrink: 0 }} />
+                                      {task}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {d.note && <div style={{ fontSize: 11.5, color: "#8C7D6B", fontStyle: "italic" }}>{d.note}</div>}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

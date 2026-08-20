@@ -1,5 +1,23 @@
 export const config = { runtime: "edge" };
 
+// If strict JSON.parse fails (e.g. a long plan got truncated mid-array), salvage whatever
+// complete {...} day objects we can find instead of losing the whole plan over one bad day.
+function repairAndParseDays(rawText) {
+  const objectMatches = rawText.match(/\{[^{}]*\}/g) || [];
+  const recovered = [];
+  for (const chunk of objectMatches) {
+    try {
+      const obj = JSON.parse(chunk);
+      if (obj && typeof obj.day === "number" && Array.isArray(obj.tasks)) {
+        recovered.push(obj);
+      }
+    } catch {
+      // skip this one malformed day, keep going
+    }
+  }
+  return recovered;
+}
+
 export default async function handler(req) {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
@@ -18,9 +36,11 @@ export default async function handler(req) {
 The student has ${daysRemaining} days remaining until their exam. Based on their real doubt-asking history, here are the topics they've struggled with most (asked about most frequently), by subject:
 ${weakTopicsText}
 Generate a ${planLength}-day revision plan (covering the next ${planLength} days) that prioritizes these weak topics early, while still being a sensible, balanced study schedule (mixing revision of weak topics with lighter review of other areas, not just endlessly repeating the same topic). If ${planLength} is less than ${daysRemaining}, treat this as the first ${planLength} days of a longer runway, not a cram-everything-in plan.
+For each day, give a REAL breakdown of specific, concrete tasks — not a single vague sentence. Think like an actual tutor writing a real day's assignment.
 Respond with ONLY a raw JSON array — no markdown code fences, no commentary. Each item must have exactly this shape:
-{"day": 1, "subject": "Physics", "focus": "short focus description, e.g. 'Kinematics — numerical practice'", "note": "one sentence on why/what to do that day"}
-Keep "focus" and "note" concise. Do not include a trailing comma after the last item.`;
+{"day": 1, "subject": "Physics", "topic": "short topic name, e.g. 'Kinematics'", "timeEstimate": "e.g. '2 hours'", "difficulty": "Easy, Medium, or Hard", "tasks": ["specific concrete task 1", "specific concrete task 2", "specific concrete task 3"], "note": "one sentence on why this matters today or how it connects to their weak areas"}
+Give exactly 3 tasks per day, each a real, specific, actionable instruction (e.g. "Solve 10 numerical problems on relative velocity" not just "practice problems"). Keep each task under 15 words.
+Critical formatting: output must be strictly valid JSON. Never use a double-quote character inside any string value. Do not include a trailing comma after the last item.`;
 
   try {
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -32,7 +52,7 @@ Keep "focus" and "note" concise. Do not include a trailing comma after the last 
       },
       body: JSON.stringify({
         model: modelId,
-        max_tokens: 4000,
+        max_tokens: 6000,
         system: systemPrompt,
         messages: [{ role: "user", content: "Generate the study plan now." }],
       }),
@@ -48,7 +68,14 @@ Keep "focus" and "note" concise. Do not include a trailing comma after the last 
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) throw new Error("Model did not return a JSON array");
 
-    const plan = JSON.parse(jsonMatch[0]);
+    let plan;
+    try {
+      plan = JSON.parse(jsonMatch[0]);
+    } catch (parseErr) {
+      console.error("Strict JSON parse failed, attempting repair:", parseErr.message);
+      plan = repairAndParseDays(jsonMatch[0]);
+    }
+
     if (!Array.isArray(plan) || plan.length === 0) throw new Error("Empty plan");
 
     return new Response(JSON.stringify({ plan }), {
