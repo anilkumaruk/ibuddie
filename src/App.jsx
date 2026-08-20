@@ -43,6 +43,30 @@ function localDateStr(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+// Converts formula text written with plain ^ and _ notation (e.g. "v^2", "v_rms",
+// "a_n = a·r^(n-1)") into real superscript/subscript React elements, instead of showing
+// the literal caret/underscore characters.
+function renderFormula(text) {
+  const parts = [];
+  const regex = /([\^_])(\([^)]+\)|[A-Za-z0-9]+)/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    const [, marker, raw] = match;
+    const content = raw.startsWith("(") ? raw.slice(1, -1) : raw;
+    if (marker === "^") {
+      parts.push(<sup key={key++} style={{ fontSize: "0.72em" }}>{content}</sup>);
+    } else {
+      parts.push(<sub key={key++} style={{ fontSize: "0.72em" }}>{content}</sub>);
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
 const BADGE_DEFS = [
   { id: "streak_3", label: "3-Day Streak", emoji: "🔥", check: (s) => s.streak.longest >= 3 },
   { id: "streak_7", label: "7-Day Streak", emoji: "🔥", check: (s) => s.streak.longest >= 7 },
@@ -2551,7 +2575,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                             {(FORMULA_BANK[currentSubject.label]?.[formulaPucYear]?.[formulaChapter] || []).map((f, i) => (
                               <div key={i} style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
                                 <div style={{ fontSize: 11.5, fontWeight: 700, color: "#8F6A08", marginBottom: 4 }}>{f.name}</div>
-                                <div style={{ fontSize: 14, color: "#2B2018", fontFamily: "'SF Mono', Consolas, monospace" }}>{f.formula}</div>
+                                <div style={{ fontSize: 14, color: "#2B2018", fontFamily: "'SF Mono', Consolas, monospace" }}>{renderFormula(f.formula)}</div>
                                 {f.note && <div style={{ fontSize: 11, color: "#8C7D6B", marginTop: 4 }}>{f.note}</div>}
                               </div>
                             ))}
