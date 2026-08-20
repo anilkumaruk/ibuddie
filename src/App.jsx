@@ -5,12 +5,13 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "./Login.jsx";
 import { STORED_PYQ_PAPERS } from "./data/pyqPapers.js";
+import { FORMULA_BANK } from "./data/formulaBank.js";
 import AvatarWidget from "./AvatarWidget.jsx";
 import VoiceCallModal from "./VoiceCallModal.jsx";
 
@@ -94,6 +95,7 @@ const NAV_ITEMS = [
   { key: "topics", label: "Important Topics", icon: BookMarked },
   { key: "pyq", label: "PYQ Bank", icon: FileQuestion },
   { key: "studyplan", label: "Study Plan", icon: Target },
+  { key: "formulas", label: "Formula Bank", icon: Sigma },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -179,6 +181,8 @@ export default function App({ user, onLogout }) {
   const [pyqSelection, setPyqSelection] = useState(""); // the chosen chapter name or year
   const [pyqSetNumber, setPyqSetNumber] = useState(""); // which NEET/JEE/KCET set code (50/60/70/80), for year-based browsing
   const [pyqBrowseMode, setPyqBrowseMode] = useState("questions"); // "questions" | "pdf" — which By Year sub-flow is active
+  const [formulaPucYear, setFormulaPucYear] = useState("2nd");
+  const [formulaChapter, setFormulaChapter] = useState("");
 
   const [studyExamDate, setStudyExamDate] = useState(() => localStorage.getItem("ibuddie_exam_date") || "");
   const [studyPlanStep, setStudyPlanStep] = useState("setup"); // "setup" | "analysis" | "loading" | "plan"
@@ -1570,7 +1574,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -2486,6 +2490,75 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                     >
                       <RotateCcw size={15} /> New Set
                     </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {view === "formulas" && (
+            <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+              {subject === "general" ? (
+                <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", maxWidth: 320 }}>
+                  <Sigma size={28} color="#B8860B" style={{ marginBottom: 12 }} />
+                  <div style={{ fontSize: 14.5 }}>Pick Physics, Chemistry, or Mathematics from above to browse formulas.</div>
+                </div>
+              ) : !FORMULA_BANK[currentSubject.label] ? (
+                <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", maxWidth: 320 }}>
+                  <Sigma size={28} color="#B8860B" style={{ marginBottom: 12 }} />
+                  <div style={{ fontSize: 14.5 }}>{currentSubject.label} is fact/process-based rather than formula-based, so it isn't covered here. Try Physics, Chemistry, or Mathematics.</div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{currentSubject.label} — Formula Bank</div>
+                  <div style={{ fontSize: 12, color: "#8C7D6B", marginBottom: 18 }}>A curated, verified reference — not exhaustive, but the core formulas you need most</div>
+
+                  <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+                    {[{ id: "1st", label: "1st PUC" }, { id: "2nd", label: "2nd PUC" }].map((p) => (
+                      <div
+                        key={p.id}
+                        onClick={() => { setFormulaPucYear(p.id); setFormulaChapter(""); }}
+                        style={{ padding: "6px 16px", borderRadius: 999, cursor: "pointer", fontSize: 12.5, fontWeight: 700, border: formulaPucYear === p.id ? "1.5px solid #B8860B" : "1px solid #E4E2DA", background: formulaPucYear === p.id ? "#B8860B14" : "#FFFFFF", color: formulaPucYear === p.id ? "#8F6A08" : "#2B2018" }}
+                      >
+                        {p.label}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 200px", maxWidth: 260 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>Chapters</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 480, overflowY: "auto" }}>
+                        {Object.keys(FORMULA_BANK[currentSubject.label]?.[formulaPucYear] || {}).map((chapter) => (
+                          <div
+                            key={chapter}
+                            onClick={() => setFormulaChapter(chapter)}
+                            style={{ padding: "9px 12px", borderRadius: 8, cursor: "pointer", fontSize: 12.5, border: formulaChapter === chapter ? "1.5px solid #B8860B" : "1px solid #E4E2DA", background: formulaChapter === chapter ? "#B8860B14" : "#F9F9F7", color: "#2B2018" }}
+                          >
+                            {chapter}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ flex: "2 1 320px", minWidth: 0 }}>
+                      {!formulaChapter ? (
+                        <div style={{ color: "#8C7D6B", fontSize: 13, padding: "20px 0" }}>← Pick a chapter to see its formulas</div>
+                      ) : (
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#2B2018", marginBottom: 14 }}>{formulaChapter}</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                            {(FORMULA_BANK[currentSubject.label]?.[formulaPucYear]?.[formulaChapter] || []).map((f, i) => (
+                              <div key={i} style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
+                                <div style={{ fontSize: 11.5, fontWeight: 700, color: "#8F6A08", marginBottom: 4 }}>{f.name}</div>
+                                <div style={{ fontSize: 14, color: "#2B2018", fontFamily: "'SF Mono', Consolas, monospace" }}>{f.formula}</div>
+                                {f.note && <div style={{ fontSize: 11, color: "#8C7D6B", marginTop: 4 }}>{f.note}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
