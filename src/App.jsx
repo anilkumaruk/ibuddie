@@ -149,6 +149,8 @@ export default function App({ user, onLogout }) {
   const [studyExamDate, setStudyExamDate] = useState(() => localStorage.getItem("ibuddie_exam_date") || "");
   const [studyPlanStep, setStudyPlanStep] = useState("setup"); // "setup" | "analysis" | "loading" | "plan"
   const [studyPlan, setStudyPlan] = useState([]); // [{ day, date, focus }]
+  const [studyPlanGeneratedAt, setStudyPlanGeneratedAt] = useState(null); // timestamp — used to figure out which plan "day" is today
+  const [studyPlanCompletedDays, setStudyPlanCompletedDays] = useState([]); // array of completed day numbers
   const [pyqList, setPyqList] = useState([]);
   const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
@@ -271,6 +273,28 @@ export default function App({ user, onLogout }) {
       }
     }
     loadConversations();
+  }, [user?.uid]);
+
+  // Loads any previously-generated study plan so it survives navigation/refresh — no
+  // need to re-spend a generation call just from leaving the tab and coming back.
+  useEffect(() => {
+    if (!user?.uid) return;
+    async function loadStudyPlan() {
+      try {
+        const snap = await getDoc(doc(db, "users", user.uid, "studyPlan", "current"));
+        if (snap.exists()) {
+          const data = snap.data();
+          setStudyPlan(data.plan || []);
+          setStudyPlanGeneratedAt(data.generatedAt || null);
+          setStudyPlanCompletedDays(data.completedDays || []);
+          if (data.examDate) setStudyExamDate(data.examDate);
+          if (data.plan && data.plan.length > 0) setStudyPlanStep("plan");
+        }
+      } catch (e) {
+        console.error("Failed to load study plan from Firestore:", e);
+      }
+    }
+    loadStudyPlan();
   }, [user?.uid]);
 
 
@@ -582,13 +606,36 @@ export default function App({ user, onLogout }) {
       if (!res.ok || !data.plan) throw new Error(data.error || `Server error (${res.status})`);
 
       consumeUsage();
+      const generatedAt = Date.now();
       setStudyPlan(data.plan);
+      setStudyPlanGeneratedAt(generatedAt);
+      setStudyPlanCompletedDays([]);
       setStudyPlanStep("plan");
+      if (user?.uid) {
+        setDoc(doc(db, "users", user.uid, "studyPlan", "current"), {
+          plan: data.plan,
+          examDate: studyExamDate,
+          generatedAt,
+          completedDays: [],
+        }).catch((e) => console.error("Failed to save study plan to Firestore:", e));
+      }
     } catch (e) {
       console.error(e);
       alert(`Couldn't build your study plan: ${e.message}`);
       setStudyPlanStep("analysis");
     }
+  }
+
+  function toggleStudyDayComplete(dayNumber) {
+    setStudyPlanCompletedDays((prev) => {
+      const updated = prev.includes(dayNumber) ? prev.filter((d) => d !== dayNumber) : [...prev, dayNumber];
+      if (user?.uid) {
+        updateDoc(doc(db, "users", user.uid, "studyPlan", "current"), { completedDays: updated }).catch((e) =>
+          console.error("Failed to sync completed day:", e)
+        );
+      }
+      return updated;
+    });
   }
 
   function formatTimer(seconds) {
@@ -2062,6 +2109,11 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       disabled={!studyExamDate}
                       onClick={() => {
                         localStorage.setItem("ibuddie_exam_date", studyExamDate);
+                        if (user?.uid) {
+                          setDoc(doc(db, "users", user.uid, "studyPlan", "current"), { examDate: studyExamDate }, { merge: true }).catch((e) =>
+                            console.error("Failed to save exam date to Firestore:", e)
+                          );
+                        }
                         setStudyPlanStep("analysis");
                       }}
                       style={{ padding: "13px 26px", borderRadius: 12, border: "none", background: studyExamDate ? ACCENT : "#E4E2DA", color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: studyExamDate ? "pointer" : "not-allowed" }}
@@ -2077,27 +2129,78 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
                     <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018" }}>Your {studyPlan.length}-Day Plan</div>
                     <div
-                      onClick={() => { localStorage.removeItem("ibuddie_exam_date"); setStudyExamDate(""); setStudyPlanStep("setup"); }}
+                      onClick={() => {
+                        localStorage.removeItem("ibuddie_exam_date");
+                        setStudyExamDate("");
+                        setStudyPlan([]);
+                        setStudyPlanCompletedDays([]);
+                        setStudyPlanStep("setup");
+                        if (user?.uid) {
+                          deleteDoc(doc(db, "users", user.uid, "studyPlan", "current")).catch((e) =>
+                            console.error("Failed to clear study plan from Firestore:", e)
+                          );
+                        }
+                      }}
                       style={{ fontSize: 12, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}
                     >
                       Change exam date
                     </div>
                   </div>
-                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 20 }}>Built from your real doubt history — weak topics prioritized first</div>
+                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 14 }}>Built from your real doubt history — weak topics prioritized first</div>
+
+                  {/* Progress bar */}
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: "#8C7D6B" }}>{studyPlanCompletedDays.length} of {studyPlan.length} days done</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: "#8F6A08" }}>{Math.round((studyPlanCompletedDays.length / studyPlan.length) * 100)}%</span>
+                    </div>
+                    <div style={{ height: 6, borderRadius: 999, background: "#E4E2DA", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${(studyPlanCompletedDays.length / studyPlan.length) * 100}%`, background: ACCENT, borderRadius: 999, transition: "width 0.2s ease" }} />
+                    </div>
+                  </div>
+
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-                    {studyPlan.map((d, i) => (
-                      <div key={i} style={{ display: "flex", gap: 14, padding: "14px 16px", borderRadius: 12, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
-                        <div style={{ width: 40, height: 40, borderRadius: 10, background: "#B8860B14", color: "#8F6A08", fontSize: 12, fontWeight: 800, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          <div style={{ fontSize: 8, fontWeight: 700 }}>DAY</div>
-                          {d.day}
+                    {studyPlan.map((d, i) => {
+                      // Which plan day number corresponds to today, based on when the plan was generated
+                      const daysSinceGenerated = studyPlanGeneratedAt ? Math.floor((Date.now() - studyPlanGeneratedAt) / 86400000) + 1 : null;
+                      const isToday = daysSinceGenerated === d.day;
+                      const isDone = studyPlanCompletedDays.includes(d.day);
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            display: "flex", gap: 14, padding: "14px 16px", borderRadius: 12,
+                            border: isToday ? `1.5px solid ${ACCENT}` : "1px solid #E4E2DA",
+                            background: isToday ? "#B8860B0D" : isDone ? "#F2F2F0" : "#F9F9F7",
+                            opacity: isDone ? 0.7 : 1,
+                          }}
+                        >
+                          <div
+                            onClick={() => toggleStudyDayComplete(d.day)}
+                            style={{
+                              width: 40, height: 40, borderRadius: 10, flexShrink: 0, cursor: "pointer",
+                              background: isDone ? "#2F6B4A" : "#B8860B14", color: isDone ? "#fff" : "#8F6A08",
+                              fontSize: 12, fontWeight: 800, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                            }}
+                          >
+                            {isDone ? <CheckCircle2 size={18} /> : (
+                              <>
+                                <div style={{ fontSize: 8, fontWeight: 700 }}>DAY</div>
+                                {d.day}
+                              </>
+                            )}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "#8F6A08", textTransform: "uppercase" }}>{d.subject}</div>
+                              {isToday && !isDone && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: ACCENT, padding: "1px 7px", borderRadius: 999 }}>TODAY</span>}
+                            </div>
+                            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#2B2018", marginBottom: 3, textDecoration: isDone ? "line-through" : "none" }}>{d.focus}</div>
+                            <div style={{ fontSize: 12, color: "#8C7D6B" }}>{d.note}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "#8F6A08", marginBottom: 2, textTransform: "uppercase" }}>{d.subject}</div>
-                          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#2B2018", marginBottom: 3 }}>{d.focus}</div>
-                          <div style={{ fontSize: 12, color: "#8C7D6B" }}>{d.note}</div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <button
                     onClick={generateStudyPlan}
