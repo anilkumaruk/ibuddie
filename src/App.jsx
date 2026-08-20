@@ -5,13 +5,14 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma, TrendingUp,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "./Login.jsx";
 import { STORED_PYQ_PAPERS } from "./data/pyqPapers.js";
 import { FORMULA_BANK } from "./data/formulaBank.js";
+import { predictNeetRank, predictJeeRank, predictKcetRank } from "./data/rankData.js";
 import AvatarWidget from "./AvatarWidget.jsx";
 import VoiceCallModal from "./VoiceCallModal.jsx";
 
@@ -120,6 +121,7 @@ const NAV_ITEMS = [
   { key: "pyq", label: "PYQ Bank", icon: FileQuestion },
   { key: "studyplan", label: "Study Plan", icon: Target },
   { key: "formulas", label: "Formula Bank", icon: Sigma },
+  { key: "rankpredictor", label: "Rank Predictor", icon: TrendingUp },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -207,6 +209,8 @@ export default function App({ user, onLogout }) {
   const [pyqBrowseMode, setPyqBrowseMode] = useState("questions"); // "questions" | "pdf" — which By Year sub-flow is active
   const [formulaPucYear, setFormulaPucYear] = useState("2nd");
   const [formulaChapter, setFormulaChapter] = useState("");
+  const [rankMarksInput, setRankMarksInput] = useState("");
+  const [rankPucInput, setRankPucInput] = useState(""); // 2nd PUC PCM %, only used for KCET
 
   const [studyExamDate, setStudyExamDate] = useState(() => localStorage.getItem("ibuddie_exam_date") || "");
   const [studyPlanStep, setStudyPlanStep] = useState("setup"); // "setup" | "analysis" | "loading" | "plan"
@@ -1562,7 +1566,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -2552,6 +2556,115 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               )}
             </div>
           )}
+
+          {view === "rankpredictor" && (() => {
+            const marks = parseFloat(rankMarksInput);
+            const puc = parseFloat(rankPucInput);
+            const hasValidMarks = !isNaN(marks) && marks >= 0;
+            const maxMarks = exam === "NEET" ? 720 : exam === "JEE" ? 300 : 180;
+
+            let result = null;
+            if (hasValidMarks) {
+              if (exam === "NEET") result = { type: "neet", data: predictNeetRank(Math.min(marks, 720)) };
+              else if (exam === "JEE") result = { type: "jee", data: predictJeeRank(Math.min(marks, 300)) };
+              else if (exam === "KCET" && !isNaN(puc) && puc >= 0 && puc <= 100) result = { type: "kcet", data: predictKcetRank(Math.min(marks, 180), puc) };
+            }
+
+            return (
+              <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+                <div style={{ maxWidth: 480, margin: "0 auto", width: "100%" }}>
+                  <div style={{ textAlign: "center", marginBottom: 18 }}>
+                    <TrendingUp size={26} color="#B8860B" style={{ marginBottom: 10 }} />
+                    <div style={{ fontSize: 17, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{exam} Rank Predictor</div>
+                    <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Based on real official data — not a guarantee</div>
+                  </div>
+
+                  <div style={{ background: "#FFF4E9", border: "1px solid #E9C99A", borderRadius: 12, padding: "12px 14px", marginBottom: 20, fontSize: 11.5, color: "#7A5A1E", lineHeight: 1.5 }}>
+                    ⚠️ Rank at the same score changes a lot year to year depending on how hard that year's paper was, and how many students appeared. Treat this as a planning range, not a promised rank — your actual result depends on the specific year's difficulty.
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "#2B2018", marginBottom: 6 }}>Your {exam} score (out of {maxMarks})</div>
+                    <input
+                      type="number"
+                      value={rankMarksInput}
+                      onChange={(e) => setRankMarksInput(e.target.value)}
+                      placeholder={`e.g. ${exam === "NEET" ? "550" : exam === "JEE" ? "180" : "130"}`}
+                      style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "1.5px solid #E4E2DA", fontSize: 14, boxSizing: "border-box" }}
+                    />
+                  </div>
+
+                  {exam === "KCET" && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "#2B2018", marginBottom: 6 }}>Your 2nd PUC PCM percentage</div>
+                      <input
+                        type="number"
+                        value={rankPucInput}
+                        onChange={(e) => setRankPucInput(e.target.value)}
+                        placeholder="e.g. 92"
+                        style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "1.5px solid #E4E2DA", fontSize: 14, boxSizing: "border-box" }}
+                      />
+                      <div style={{ fontSize: 11, color: "#8C7D6B", marginTop: 5 }}>KCET rank isn't based on exam marks alone — KEA uses 50% KCET marks + 50% your actual 2nd PUC PCM %. Both are needed for a real estimate.</div>
+                    </div>
+                  )}
+
+                  {!result && exam === "KCET" && hasValidMarks && (
+                    <div style={{ fontSize: 12.5, color: "#B23B3B", marginBottom: 16 }}>Enter your 2nd PUC PCM percentage too — KCET rank can't be estimated from exam marks alone.</div>
+                  )}
+
+                  {result?.type === "neet" && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Estimated AIR Range</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+                        {result.data.y2025 && (
+                          <div style={{ padding: "14px 16px", borderRadius: 12, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#8F6A08", marginBottom: 4 }}>IF PAPER IS HARD (like NEET 2025)</div>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: "#2B2018" }}>AIR {result.data.y2025[0].toLocaleString("en-IN")} – {result.data.y2025[1].toLocaleString("en-IN")}</div>
+                          </div>
+                        )}
+                        {result.data.y2024 && (
+                          <div style={{ padding: "14px 16px", borderRadius: 12, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#8F6A08", marginBottom: 4 }}>IF PAPER IS EASIER (like NEET 2024)</div>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: "#2B2018" }}>AIR {result.data.y2024[0].toLocaleString("en-IN")} – {result.data.y2024[1].toLocaleString("en-IN")}</div>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#8C7D6B", lineHeight: 1.5 }}>The gap between these two is real, not an error — {marks} marks genuinely meant very different ranks in 2024 vs 2025 because the papers were so differently difficult. Your actual rank will likely land somewhere in this general zone, closer to whichever year's difficulty your exam resembles.</div>
+                    </div>
+                  )}
+
+                  {result?.type === "jee" && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Estimated Rank Range</div>
+                      {result.data ? (
+                        <div style={{ padding: "14px 16px", borderRadius: 12, border: "1px solid #E4E2DA", background: "#F9F9F7", marginBottom: 14 }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: "#2B2018" }}>Rank {result.data[0].toLocaleString("en-IN")} – {result.data[1].toLocaleString("en-IN")}</div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 14 }}>Score out of range — try a value between 0 and 300.</div>
+                      )}
+                      <div style={{ fontSize: 11.5, color: "#B23B3B", lineHeight: 1.5 }}>Important: JEE Main uses normalized percentiles, not raw marks — NTA doesn't officially publish a marks-to-rank table. This estimate is built from third-party data that disagreed by 40-80 marks at the same percentile in our own research, so treat this range as a rough zone, not a precise figure — wider than the NEET estimate above.</div>
+                    </div>
+                  )}
+
+                  {result?.type === "kcet" && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Estimated Rank Range</div>
+                      <div style={{ padding: "14px 16px", borderRadius: 12, border: "1px solid #E4E2DA", background: "#F9F9F7", marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, color: "#8C7D6B", marginBottom: 4 }}>Combined merit score: {result.data.combined}%</div>
+                        {result.data.range ? (
+                          <div style={{ fontSize: 20, fontWeight: 800, color: "#2B2018" }}>Rank {result.data.range[0].toLocaleString("en-IN")} – {result.data.range[1].toLocaleString("en-IN")}</div>
+                        ) : (
+                          <div style={{ fontSize: 13, color: "#8C7D6B" }}>Out of predictable range</div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#8C7D6B", lineHeight: 1.5 }}>Based on KEA's real 50:50 formula (KCET marks + 2nd PUC PCM%), calibrated against 2025 KCET data (~3 lakh candidates). Board-mark normalization across different boards can shift this somewhat.</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {view === "studyplan" && (
             <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
