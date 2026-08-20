@@ -1735,6 +1735,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 const bestPct = bestResult ? Math.round((bestResult.score / bestResult.total) * 100) : 0;
                 const subjectCounts = {};
                 for (const r of mockTestHistory) subjectCounts[r.subject] = (subjectCounts[r.subject] || 0) + 1;
+                const last7DaysTests = mockTestHistory.filter((r) => Date.now() - r.ts < 7 * 24 * 60 * 60 * 1000);
                 const RING_R = 30, RING_C = 2 * Math.PI * 30;
 
                 return (
@@ -1853,7 +1854,8 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
                     {mockTestHistory.length > 0 && (
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Your Recent Attempts</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Your Recent Attempts</div>
+                        <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 12 }}>{last7DaysTests.length} test{last7DaysTests.length === 1 ? "" : "s"} in the last 7 days · synced to your account, visible on any device</div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           {mockTestHistory.slice(0, 8).map((r, i) => {
                             const pct = Math.round((r.score / r.total) * 100);
