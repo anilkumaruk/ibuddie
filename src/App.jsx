@@ -5,7 +5,7 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
@@ -30,6 +30,20 @@ const SUBJECTS = [
 ];
 
 const EXAMS = ["NEET", "JEE", "KCET"];
+
+// Real, checkable milestones based on actual activity — no vanity numbers.
+const BADGE_DEFS = [
+  { id: "streak_3", label: "3-Day Streak", emoji: "🔥", check: (s) => s.streak.longest >= 3 },
+  { id: "streak_7", label: "7-Day Streak", emoji: "🔥", check: (s) => s.streak.longest >= 7 },
+  { id: "streak_14", label: "14-Day Streak", emoji: "🔥", check: (s) => s.streak.longest >= 14 },
+  { id: "streak_30", label: "30-Day Streak", emoji: "🔥", check: (s) => s.streak.longest >= 30 },
+  { id: "doubts_10", label: "10 Doubts Solved", emoji: "💡", check: (s) => s.totalDoubts >= 10 },
+  { id: "doubts_50", label: "50 Doubts Solved", emoji: "💡", check: (s) => s.totalDoubts >= 50 },
+  { id: "doubts_100", label: "100 Doubts Solved", emoji: "🧠", check: (s) => s.totalDoubts >= 100 },
+  { id: "first_test", label: "First Mock Test", emoji: "📝", check: (s) => s.totalTests >= 1 },
+  { id: "tests_10", label: "10 Mock Tests", emoji: "📝", check: (s) => s.totalTests >= 10 },
+  { id: "perfect_score", label: "Perfect Score", emoji: "⭐", check: (s) => s.hasPerfectScore },
+];
 const ACCENT = "#17140F"; // landing page's "ink"
 const GREEN = "#2F6B4A"; // landing page's checkmark green
 
@@ -130,6 +144,11 @@ export default function App({ user, onLogout }) {
     haiku: { active: false, expiresAt: 0 },
     sonnet: { active: false, expiresAt: 0 },
   });
+  const [streakData, setStreakData] = useState({ current: 0, longest: 0, lastActiveDate: null });
+  const [xp, setXp] = useState(0);
+  const [badges, setBadges] = useState([]); // array of earned badge ids
+  const [newBadgeToast, setNewBadgeToast] = useState(null); // badge just earned, shown briefly
+  const [achievementsOpen, setAchievementsOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [upgradeModel, setUpgradeModel] = useState(null); // which model triggered the paywall
   const [upgradeBusy, setUpgradeBusy] = useState(false);
@@ -217,11 +236,18 @@ export default function App({ user, onLogout }) {
     async function loadUsage() {
       const ref = doc(db, "users", user.uid);
       const snap = await getDoc(ref);
+      const defaultStreak = { current: 0, longest: 0, lastActiveDate: null };
 
       if (!snap.exists()) {
-        await setDoc(ref, { counts: defaultCounts, lastResetDate: todayStr, lastResetMonth: monthStr, subscriptions: defaultSubs });
+        await setDoc(ref, {
+          counts: defaultCounts, lastResetDate: todayStr, lastResetMonth: monthStr, subscriptions: defaultSubs,
+          streak: defaultStreak, xp: 0, badges: [], totalDoubtsAsked: 0, totalTestsCompleted: 0, hasPerfectScore: false,
+        });
         setUsageCounts(defaultCounts);
         setSubscriptions(defaultSubs);
+        setStreakData(defaultStreak);
+        setXp(0);
+        setBadges([]);
         return;
       }
 
@@ -253,12 +279,27 @@ export default function App({ user, onLogout }) {
       if (needsDayReset || needsMonthReset) update.counts = counts;
       if (needsDayReset) update.lastResetDate = todayStr;
       if (needsMonthReset) update.lastResetMonth = monthStr;
+
+      // Check for a broken streak on load — don't wait for the next activity to notice they
+      // missed a day. today/yesterday keeps the streak alive; anything older breaks it.
+      let streak = { ...defaultStreak, ...(data.streak || {}) };
+      if (streak.lastActiveDate && streak.lastActiveDate !== todayStr) {
+        const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+        if (streak.lastActiveDate !== yesterday && streak.current !== 0) {
+          streak = { ...streak, current: 0 };
+          update.streak = streak;
+        }
+      }
+
       if (Object.keys(update).length > 0) {
         await setDoc(ref, update, { merge: true });
       }
 
       setUsageCounts(counts);
       setSubscriptions(subs);
+      setStreakData(streak);
+      setXp(data.xp || 0);
+      setBadges(data.badges || []);
     }
 
     loadUsage().catch((e) => console.error("Failed to load usage:", e));
@@ -531,6 +572,7 @@ export default function App({ user, onLogout }) {
         addDoc(collection(db, "users", user.uid, "mockTestResults"), result).catch((e) =>
           console.error("Failed to save mock test result:", e)
         );
+        recordActivity("test", { score, total: prev.questions.length });
       }
 
       return { ...prev, status: "results", score };
@@ -720,6 +762,69 @@ export default function App({ user, onLogout }) {
     });
   }
 
+  // Core gamification engine — called whenever the student does something that counts
+  // (asks a doubt, finishes a mock test). Updates streak, XP, and checks for new badges,
+  // all against real activity, never simulated.
+  async function recordActivity(type, meta = {}) {
+    if (!user?.uid) return;
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+    let newStreak = { ...streakData };
+    if (streakData.lastActiveDate !== todayStr) {
+      if (streakData.lastActiveDate === yesterday) {
+        newStreak.current = streakData.current + 1;
+      } else {
+        newStreak.current = 1; // first activity ever, or streak had already broken
+      }
+      newStreak.lastActiveDate = todayStr;
+      newStreak.longest = Math.max(newStreak.current, streakData.longest);
+    }
+    const streakExtendedToday = newStreak.lastActiveDate === todayStr && streakData.lastActiveDate !== todayStr;
+
+    let xpGain = 0;
+    if (type === "doubt") xpGain = 10;
+    if (type === "test") xpGain = 25 + Math.round((meta.score / meta.total) * 25);
+    if (streakExtendedToday) xpGain += 15;
+    const newXp = xp + xpGain;
+
+    const ref = doc(db, "users", user.uid);
+    const update = { streak: newStreak, xp: newXp };
+    if (type === "doubt") update.totalDoubtsAsked = increment(1);
+    if (type === "test") {
+      update.totalTestsCompleted = increment(1);
+      if (meta.score === meta.total && meta.total > 0) update.hasPerfectScore = true;
+    }
+
+    // Badge checking needs the up-to-date lifetime totals, which increment() applies
+    // server-side — so re-read after the update rather than trusting stale local counts.
+    try {
+      await setDoc(ref, update, { merge: true });
+      const freshSnap = await getDoc(ref);
+      const freshData = freshSnap.data();
+      const statsForBadges = {
+        streak: newStreak,
+        totalDoubts: freshData.totalDoubtsAsked || 0,
+        totalTests: freshData.totalTestsCompleted || 0,
+        hasPerfectScore: !!freshData.hasPerfectScore,
+      };
+      const currentBadges = freshData.badges || [];
+      const earnedNow = BADGE_DEFS.filter((b) => !currentBadges.includes(b.id) && b.check(statsForBadges));
+      if (earnedNow.length > 0) {
+        const updatedBadges = [...currentBadges, ...earnedNow.map((b) => b.id)];
+        await setDoc(ref, { badges: updatedBadges }, { merge: true });
+        setBadges(updatedBadges);
+        setNewBadgeToast(earnedNow[0]);
+        setTimeout(() => setNewBadgeToast(null), 4000);
+      }
+      setStreakData(newStreak);
+      setXp(newXp);
+    } catch (e) {
+      console.error("Failed to record activity:", e);
+    }
+  }
+
   function formatTimer(seconds) {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -809,6 +914,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           return updated;
         });
       }
+      recordActivity("doubt");
     } catch {
       setMessages((prev) => [...prev, { role: "assistant", topic: "", difficulty: "", body: "Couldn't reach the AI Mentor. Please try again.", subject }]);
     } finally {
@@ -1403,6 +1509,16 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
+              {user?.uid && (
+                <div
+                  onClick={() => setAchievementsOpen(true)}
+                  style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 6, background: "#FFFFFF", padding: isMobile ? "3px 7px" : "5px 12px", borderRadius: 999, boxShadow: "0 1px 4px rgba(20,15,5,0.25)", cursor: "pointer" }}
+                >
+                  <Flame size={isMobile ? 11 : 15} color={streakData.current > 0 ? "#D9720D" : "#8C7D6B"} fill={streakData.current > 0 ? "#D9720D" : "none"} />
+                  <span style={{ fontSize: isMobile ? 8 : 12.5, fontWeight: 700, color: "#2B2018" }}>{streakData.current}</span>
+                  <span style={{ fontSize: isMobile ? 7 : 11, color: "#8C7D6B", borderLeft: "1px solid #E4E2DA", paddingLeft: isMobile ? 4 : 8, marginLeft: 1 }}>{xp} XP</span>
+                </div>
+              )}
               <Bell size={isMobile ? 10 : 17} color="#8C7D6B" />
               <div
                 onClick={() => setProfileOpen((v) => !v)}
@@ -2552,6 +2668,65 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   </div>
                 );
               })()}
+            </div>
+          )}
+
+          {/* Achievements modal */}
+          {achievementsOpen && (
+            <div
+              onClick={() => setAchievementsOpen(false)}
+              style={{ position: "fixed", inset: 0, background: "rgba(20,15,10,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}
+            >
+              <div onClick={(e) => e.stopPropagation()} style={{ background: "#FFFFFF", borderRadius: 18, padding: 24, width: 380, maxHeight: "85vh", overflowY: "auto" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018" }}>Your Progress</div>
+                  <XCircle size={18} color="#8C7D6B" style={{ cursor: "pointer" }} onClick={() => setAchievementsOpen(false)} />
+                </div>
+
+                <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
+                  <div style={{ flex: 1, textAlign: "center", padding: "14px 8px", borderRadius: 12, background: "#FFF4E9" }}>
+                    <Flame size={20} color="#D9720D" fill="#D9720D" style={{ marginBottom: 4 }} />
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#2B2018" }}>{streakData.current}</div>
+                    <div style={{ fontSize: 10, color: "#8C7D6B" }}>Day Streak</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "center", padding: "14px 8px", borderRadius: 12, background: "#F2F2F0" }}>
+                    <Award size={20} color="#8F6A08" style={{ marginBottom: 4 }} />
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#2B2018" }}>{streakData.longest}</div>
+                    <div style={{ fontSize: 10, color: "#8C7D6B" }}>Best Streak</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "center", padding: "14px 8px", borderRadius: 12, background: "#EBF3EE" }}>
+                    <Sparkles size={20} color="#2F6B4A" style={{ marginBottom: 4 }} />
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#2B2018" }}>{xp}</div>
+                    <div style={{ fontSize: 10, color: "#8C7D6B" }}>Total XP</div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>
+                  Badges ({badges.length}/{BADGE_DEFS.length})
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {BADGE_DEFS.map((b) => {
+                    const earned = badges.includes(b.id);
+                    return (
+                      <div key={b.id} style={{ padding: "12px 10px", borderRadius: 10, border: "1px solid #E4E2DA", background: earned ? "#B8860B0D" : "#F9F9F7", textAlign: "center", opacity: earned ? 1 : 0.5 }}>
+                        <div style={{ fontSize: 22, marginBottom: 4, filter: earned ? "none" : "grayscale(1)" }}>{b.emoji}</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#2B2018" }}>{b.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* New badge toast */}
+          {newBadgeToast && (
+            <div style={{ position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)", zIndex: 100, background: "#2B2018", color: "#fff", padding: "12px 22px", borderRadius: 999, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
+              <span style={{ fontSize: 20 }}>{newBadgeToast.emoji}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>Badge Earned!</div>
+                <div style={{ fontSize: 11, color: "#D9C9AE" }}>{newBadgeToast.label}</div>
+              </div>
             </div>
           )}
 
