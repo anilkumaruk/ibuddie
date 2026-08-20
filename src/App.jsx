@@ -32,6 +32,16 @@ const SUBJECTS = [
 const EXAMS = ["NEET", "JEE", "KCET"];
 
 // Real, checkable milestones based on actual activity — no vanity numbers.
+// Returns YYYY-MM-DD for the user's actual LOCAL calendar day — never use toISOString()
+// for this, since that's always UTC and would miscalculate "today" for IST (UTC+5:30)
+// users during a real window of hours, silently breaking streaks that shouldn't break.
+function localDateStr(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 const BADGE_DEFS = [
   { id: "streak_3", label: "3-Day Streak", emoji: "🔥", check: (s) => s.streak.longest >= 3 },
   { id: "streak_7", label: "7-Day Streak", emoji: "🔥", check: (s) => s.streak.longest >= 7 },
@@ -229,7 +239,7 @@ export default function App({ user, onLogout }) {
   useEffect(() => {
     if (!user?.uid) return;
     const todayStr = new Date().toDateString();
-    const monthStr = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+    const monthStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`; // local month, not UTC
     const defaultCounts = { gemini: 0, haiku: 0, sonnet: 0 };
     const defaultSubs = { haiku: { active: false, expiresAt: 0 }, sonnet: { active: false, expiresAt: 0 } };
 
@@ -282,10 +292,11 @@ export default function App({ user, onLogout }) {
 
       // Check for a broken streak on load — don't wait for the next activity to notice they
       // missed a day. today/yesterday keeps the streak alive; anything older breaks it.
+      const todayLocal = localDateStr();
+      const yesterdayLocal = localDateStr(new Date(Date.now() - 86400000));
       let streak = { ...defaultStreak, ...(data.streak || {}) };
-      if (streak.lastActiveDate && streak.lastActiveDate !== todayStr) {
-        const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-        if (streak.lastActiveDate !== yesterday && streak.current !== 0) {
+      if (streak.lastActiveDate && streak.lastActiveDate !== todayLocal) {
+        if (streak.lastActiveDate !== yesterdayLocal && streak.current !== 0) {
           streak = { ...streak, current: 0 };
           update.streak = streak;
         }
@@ -768,8 +779,8 @@ export default function App({ user, onLogout }) {
   async function recordActivity(type, meta = {}) {
     if (!user?.uid) return;
 
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const todayStr = localDateStr();
+    const yesterday = localDateStr(new Date(Date.now() - 86400000));
 
     let newStreak = { ...streakData };
     if (streakData.lastActiveDate !== todayStr) {
