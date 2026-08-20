@@ -5,7 +5,7 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma, TrendingUp,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma, TrendingUp, Brain,
   Volume2, VolumeX, Loader2, Phone,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
@@ -122,6 +122,7 @@ const NAV_ITEMS = [
   { key: "studyplan", label: "Study Plan", icon: Target },
   { key: "formulas", label: "Formula Bank", icon: Sigma },
   { key: "rankpredictor", label: "Rank Predictor", icon: TrendingUp },
+  { key: "revision", label: "Revision Reminders", icon: Brain },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -201,6 +202,8 @@ export default function App({ user, onLogout }) {
   const [mockTestChapter, setMockTestChapter] = useState("");
   const [mockTestPucYear, setMockTestPucYear] = useState("2nd"); // "1st" | "2nd" — only relevant for chapter mode
   const [mockTestHistory, setMockTestHistory] = useState([]); // real past attempts loaded from Firestore
+  const [topicReviews, setTopicReviews] = useState([]); // explicit "reviewed this topic" events, resets the spacing clock
+  const [recallCheck, setRecallCheck] = useState(null); // { subject, topic, status: "loading"|"active"|"results", questions, currentIndex, answers, score }
   const [topicsState, setTopicsState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
   const [pyqStep, setPyqStep] = useState("browse"); // "puc" | "browse" | "chapters" | "years" | "sets" | "loading" | "results"
   const [pyqSelectionType, setPyqSelectionType] = useState(""); // "chapter" | "year"
@@ -402,6 +405,22 @@ export default function App({ user, onLogout }) {
       }
     }
     loadMockTestHistory();
+  }, [user?.uid]);
+
+  // Loads explicit "reviewed this topic" events — these reset the spaced-repetition clock
+  // for a topic when the student completes a quick recall check on it.
+  useEffect(() => {
+    if (!user?.uid) return;
+    async function loadTopicReviews() {
+      try {
+        const q = query(collection(db, "users", user.uid, "topicReviews"), orderBy("ts", "desc"), limit(100));
+        const snap = await getDocs(q);
+        setTopicReviews(snap.docs.map((d) => d.data()));
+      } catch (e) {
+        console.error("Failed to load topic reviews from Firestore:", e);
+      }
+    }
+    loadTopicReviews();
   }, [user?.uid]);
 
   // Loads any previously-generated study plan so it survives navigation/refresh — no
@@ -627,6 +646,48 @@ export default function App({ user, onLogout }) {
     setMockTest({ status: "setup", count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0 });
   }
 
+  async function startRecallCheck(subj, topic) {
+    setRecallCheck({ subject: subj, topic, status: "loading", questions: [], currentIndex: 0, answers: {}, score: 0 });
+    try {
+      const subjectId = SUBJECTS.find((s) => s.label === subj)?.id;
+      const res = await fetch("/api/mock-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: subj, exam, count: 3, model: selectedModel, chapter: topic }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.questions) throw new Error(data.error || `Server error (${res.status})`);
+      setRecallCheck({ subject: subj, topic, status: "active", questions: data.questions, currentIndex: 0, answers: {}, score: 0 });
+    } catch (e) {
+      console.error("Recall check failed:", e);
+      setRecallCheck(null);
+      alert("Couldn't build the recall check. Please try again.");
+    }
+  }
+
+  function answerRecallQuestion(optionIndex) {
+    setRecallCheck((prev) => ({ ...prev, answers: { ...prev.answers, [prev.currentIndex]: optionIndex } }));
+  }
+
+  function finishRecallCheck() {
+    setRecallCheck((prev) => {
+      let score = 0;
+      prev.questions.forEach((q, i) => { if (prev.answers[i] === q.correctIndex) score++; });
+
+      // Completing the check itself resets the spacing clock — re-engaging with the topic
+      // is what matters for spaced repetition, regardless of the score this time.
+      const review = { subject: prev.subject, topic: prev.topic, ts: Date.now() };
+      setTopicReviews((r) => [review, ...r]);
+      if (user?.uid) {
+        addDoc(collection(db, "users", user.uid, "topicReviews"), review).catch((e) =>
+          console.error("Failed to save topic review:", e)
+        );
+      }
+
+      return { ...prev, status: "results", score };
+    });
+  }
+
   async function generateTopics() {
     if (subject === "general") return;
     if (!canUseModel()) return;
@@ -747,6 +808,47 @@ export default function App({ user, onLogout }) {
         .slice(0, 5); // top 5 weakest per subject is plenty to act on
     }
     return result;
+  }
+
+  // Spaced-repetition core: finds the most recent time each topic was touched, across real
+  // doubt history, mock test wrong answers, and explicit "reviewed" events — then flags
+  // topics that are due for a recall check before they're forgotten.
+  function analyzeTopicRecency() {
+    const topicLastSeen = {}; // "Subject|Topic" -> timestamp
+
+    const allConvos = [...conversations, { messages, ts: Date.now() }];
+    for (const conv of allConvos) {
+      for (const m of conv.messages || []) {
+        if (m.role !== "assistant" || !m.topic || !m.subject || m.subject === "general") continue;
+        const subjLabel = SUBJECTS.find((s) => s.id === m.subject)?.label || m.subject;
+        const key = `${subjLabel}|${m.topic}`;
+        const ts = m.ts || conv.ts || Date.now();
+        if (!topicLastSeen[key] || ts > topicLastSeen[key]) topicLastSeen[key] = ts;
+      }
+    }
+
+    for (const result of mockTestHistory) {
+      if (!result.subject || !result.wrongTopics) continue;
+      for (const topic of result.wrongTopics) {
+        const key = `${result.subject}|${topic}`;
+        if (!topicLastSeen[key] || result.ts > topicLastSeen[key]) topicLastSeen[key] = result.ts;
+      }
+    }
+
+    // Explicit reviews reset the clock — a topic just reviewed shouldn't show as "due" again immediately.
+    for (const review of topicReviews) {
+      const key = `${review.subject}|${review.topic}`;
+      if (!topicLastSeen[key] || review.ts > topicLastSeen[key]) topicLastSeen[key] = review.ts;
+    }
+
+    const now = Date.now();
+    return Object.entries(topicLastSeen)
+      .map(([key, ts]) => {
+        const [subj, topic] = key.split("|");
+        return { subject: subj, topic, daysSince: Math.floor((now - ts) / 86400000), lastSeen: ts };
+      })
+      .filter((t) => t.daysSince >= 3) // spaced-repetition threshold — not due until at least 3 days out
+      .sort((a, b) => b.daysSince - a.daysSince); // most overdue first
   }
 
   async function generateStudyPlan() {
@@ -954,7 +1056,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
         const parsed = parseReply(fullText);
         setMessages((prev) => {
           const updated = [...prev];
-          updated[updated.length - 1] = { role: "assistant", ...parsed, subject };
+          updated[updated.length - 1] = { role: "assistant", ...parsed, subject, ts: Date.now() };
           return updated;
         });
       }
@@ -1566,7 +1668,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -2666,6 +2768,51 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
             );
           })()}
 
+          {view === "revision" && (() => {
+            const dueTopics = analyzeTopicRecency();
+            return (
+              <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+                <div style={{ maxWidth: 520, margin: "0 auto", width: "100%" }}>
+                  <div style={{ textAlign: "center", marginBottom: 22 }}>
+                    <Brain size={26} color="#B8860B" style={{ marginBottom: 10 }} />
+                    <div style={{ fontSize: 17, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>Revision Reminders</div>
+                    <div style={{ fontSize: 12.5, color: "#8C7D6B" }}>Topics you're about to forget, resurfaced before you do</div>
+                  </div>
+
+                  {dueTopics.length === 0 ? (
+                    <div style={{ textAlign: "center", color: "#8C7D6B", fontSize: 13, padding: "30px 0" }}>
+                      Nothing due for review yet. As you ask doubts and take mock tests, topics you haven't touched in 3+ days will show up here.
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {dueTopics.map((t, i) => {
+                        const urgency = t.daysSince >= 30 ? { label: "LONG OVERDUE", color: "#B23B3B" } : t.daysSince >= 14 ? { label: "OVERDUE", color: "#B8860B" } : t.daysSince >= 7 ? { label: "DUE SOON", color: "#8F6A08" } : { label: "COMING UP", color: "#8C7D6B" };
+                        return (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderRadius: 12, border: "1px solid #E4E2DA", background: "#F9F9F7" }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
+                                <span style={{ fontSize: 9.5, fontWeight: 800, color: urgency.color, background: `${urgency.color}14`, padding: "2px 8px", borderRadius: 999 }}>{urgency.label}</span>
+                                <span style={{ fontSize: 10.5, color: "#8C7D6B" }}>{t.subject}</span>
+                              </div>
+                              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#2B2018" }}>{t.topic}</div>
+                              <div style={{ fontSize: 11, color: "#8C7D6B" }}>Last studied {t.daysSince} day{t.daysSince === 1 ? "" : "s"} ago</div>
+                            </div>
+                            <button
+                              onClick={() => startRecallCheck(t.subject, t.topic)}
+                              style={{ padding: "9px 14px", borderRadius: 10, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}
+                            >
+                              Quick Check
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {view === "studyplan" && (
             <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
               {!studyExamDate || studyPlanStep === "setup" ? (
@@ -2964,6 +3111,70 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                     );
                   })}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Recall Check modal */}
+          {recallCheck && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(20,15,10,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
+              <div style={{ background: "#FFFFFF", borderRadius: 18, padding: 24, width: 420, maxHeight: "85vh", overflowY: "auto" }}>
+                {recallCheck.status === "loading" ? (
+                  <div style={{ textAlign: "center", padding: "30px 0", color: "#8C7D6B", fontSize: 13.5 }}>Building your recall check on {recallCheck.topic}…</div>
+                ) : recallCheck.status === "active" ? (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8F6A08", textTransform: "uppercase" }}>{recallCheck.topic}</div>
+                      <XCircle size={17} color="#8C7D6B" style={{ cursor: "pointer" }} onClick={() => setRecallCheck(null)} />
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 16 }}>Question {recallCheck.currentIndex + 1} of {recallCheck.questions.length}</div>
+                    <div style={{ fontSize: 14.5, fontWeight: 600, color: "#2B2018", marginBottom: 16 }}>{recallCheck.questions[recallCheck.currentIndex].question}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+                      {recallCheck.questions[recallCheck.currentIndex].options.map((opt, oi) => (
+                        <div
+                          key={oi}
+                          onClick={() => answerRecallQuestion(oi)}
+                          style={{
+                            padding: "11px 14px", borderRadius: 10, cursor: "pointer", fontSize: 13,
+                            border: recallCheck.answers[recallCheck.currentIndex] === oi ? "1.5px solid #B8860B" : "1px solid #E4E2DA",
+                            background: recallCheck.answers[recallCheck.currentIndex] === oi ? "#B8860B14" : "#F9F9F7",
+                          }}
+                        >
+                          {opt}
+                        </div>
+                      ))}
+                    </div>
+                    {recallCheck.currentIndex < recallCheck.questions.length - 1 ? (
+                      <button
+                        disabled={recallCheck.answers[recallCheck.currentIndex] === undefined}
+                        onClick={() => setRecallCheck((prev) => ({ ...prev, currentIndex: prev.currentIndex + 1 }))}
+                        style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "none", background: recallCheck.answers[recallCheck.currentIndex] === undefined ? "#E4E2DA" : ACCENT, color: "#fff", fontWeight: 700, fontSize: 13.5, cursor: recallCheck.answers[recallCheck.currentIndex] === undefined ? "not-allowed" : "pointer" }}
+                      >
+                        Next
+                      </button>
+                    ) : (
+                      <button
+                        disabled={recallCheck.answers[recallCheck.currentIndex] === undefined}
+                        onClick={finishRecallCheck}
+                        style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "none", background: recallCheck.answers[recallCheck.currentIndex] === undefined ? "#E4E2DA" : ACCENT, color: "#fff", fontWeight: 700, fontSize: 13.5, cursor: recallCheck.answers[recallCheck.currentIndex] === undefined ? "not-allowed" : "pointer" }}
+                      >
+                        Finish
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: "center" }}>
+                    <CheckCircle2 size={28} color="#2F6B4A" style={{ marginBottom: 10 }} />
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 4 }}>{recallCheck.score}/{recallCheck.questions.length} correct</div>
+                    <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 18 }}>{recallCheck.topic} is refreshed — it'll come back around again in a few days.</div>
+                    <button
+                      onClick={() => setRecallCheck(null)}
+                      style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
