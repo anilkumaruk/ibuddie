@@ -1546,6 +1546,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               onClick={() => {
                 if (item.key === "settings") setSettingsOpen(true);
                 else {
+                  if (item.key === "doubt") startNewChat();
                   if (item.key === "pyq") { setPyqStep("browse"); setPyqSetNumber(""); setPyqBrowseMode("questions"); }
                   setView(item.key);
                   if (isMobile) setSidebarOpen(false);
@@ -1565,24 +1566,6 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               {sidebarOpen && item.label}
             </div>
           ))}
-        </div>
-
-        {/* New Chat */}
-        <div
-          onClick={() => { startNewChat(); setView("doubt"); if (isMobile) setSidebarOpen(false); }}
-          title="New Chat"
-          style={{
-            display: "flex", alignItems: "center", gap: 11,
-            padding: sidebarOpen ? "10px 12px" : "10px 0",
-            justifyContent: sidebarOpen ? "flex-start" : "center",
-            borderRadius: 10, marginTop: 10,
-            border: "1px solid #DAD4C5",
-            color: "#17140F",
-            fontSize: 13.5, fontWeight: 600, cursor: "pointer",
-          }}
-        >
-          <Plus size={17} />
-          {sidebarOpen && "New Chat"}
         </div>
 
         {/* Chat History */}
