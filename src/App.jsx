@@ -150,8 +150,8 @@ export default function App({ user, onLogout }) {
   const [studyPlanStep, setStudyPlanStep] = useState("setup"); // "setup" | "analysis" | "loading" | "plan"
   const [studyPlan, setStudyPlan] = useState([]); // [{ day, date, focus }]
   const [studyPlanGeneratedAt, setStudyPlanGeneratedAt] = useState(null); // timestamp — used to figure out which plan "day" is today
-  const [studyPlanCompletedDays, setStudyPlanCompletedDays] = useState([]); // array of completed day numbers
-  const [expandedStudyDay, setExpandedStudyDay] = useState(null); // which day card is expanded to show its task breakdown
+  const [studyPlanCompletedTasks, setStudyPlanCompletedTasks] = useState({}); // { "day-taskIndex": true } — per-task completion
+  const [selectedStudyDay, setSelectedStudyDay] = useState(null); // which day number is shown in the week-strip detail view
   const [pyqList, setPyqList] = useState([]);
   const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
@@ -310,9 +310,14 @@ export default function App({ user, onLogout }) {
           const data = snap.data();
           setStudyPlan(data.plan || []);
           setStudyPlanGeneratedAt(data.generatedAt || null);
-          setStudyPlanCompletedDays(data.completedDays || []);
+          setStudyPlanCompletedTasks(data.completedTasks || {}); // old completedDays format from before this update is simply not carried over — a fresh regenerate resets tracking cleanly
           if (data.examDate) setStudyExamDate(data.examDate);
-          if (data.plan && data.plan.length > 0) setStudyPlanStep("plan");
+          if (data.plan && data.plan.length > 0) {
+            setStudyPlanStep("plan");
+            const daysSince = data.generatedAt ? Math.floor((Date.now() - data.generatedAt) / 86400000) + 1 : 1;
+            const clamped = Math.min(Math.max(daysSince, 1), data.plan.length);
+            setSelectedStudyDay(clamped);
+          }
         }
       } catch (e) {
         console.error("Failed to load study plan from Firestore:", e);
@@ -633,14 +638,15 @@ export default function App({ user, onLogout }) {
       const generatedAt = Date.now();
       setStudyPlan(data.plan);
       setStudyPlanGeneratedAt(generatedAt);
-      setStudyPlanCompletedDays([]);
+      setStudyPlanCompletedTasks({});
+      setSelectedStudyDay(1); // freshly generated plan starts at day 1 (today)
       setStudyPlanStep("plan");
       if (user?.uid) {
         setDoc(doc(db, "users", user.uid, "studyPlan", "current"), {
           plan: data.plan,
           examDate: studyExamDate,
           generatedAt,
-          completedDays: [],
+          completedTasks: {},
         }).catch((e) => console.error("Failed to save study plan to Firestore:", e));
       }
     } catch (e) {
@@ -650,12 +656,15 @@ export default function App({ user, onLogout }) {
     }
   }
 
-  function toggleStudyDayComplete(dayNumber) {
-    setStudyPlanCompletedDays((prev) => {
-      const updated = prev.includes(dayNumber) ? prev.filter((d) => d !== dayNumber) : [...prev, dayNumber];
+  function toggleStudyTaskComplete(dayNumber, taskIndex) {
+    const key = `${dayNumber}-${taskIndex}`;
+    setStudyPlanCompletedTasks((prev) => {
+      const updated = { ...prev };
+      if (updated[key]) delete updated[key];
+      else updated[key] = true;
       if (user?.uid) {
-        updateDoc(doc(db, "users", user.uid, "studyPlan", "current"), { completedDays: updated }).catch((e) =>
-          console.error("Failed to sync completed day:", e)
+        updateDoc(doc(db, "users", user.uid, "studyPlan", "current"), { completedTasks: updated }).catch((e) =>
+          console.error("Failed to sync completed task:", e)
         );
       }
       return updated;
@@ -2148,117 +2157,166 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 </div>
               ) : studyPlanStep === "loading" ? (
                 <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", fontSize: 13.5 }}>Building your personalized study plan…</div>
-              ) : studyPlanStep === "plan" ? (
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018" }}>Your {studyPlan.length}-Day Plan</div>
-                    <div
-                      onClick={() => {
-                        localStorage.removeItem("ibuddie_exam_date");
-                        setStudyExamDate("");
-                        setStudyPlan([]);
-                        setStudyPlanCompletedDays([]);
-                        setStudyPlanStep("setup");
-                        if (user?.uid) {
-                          deleteDoc(doc(db, "users", user.uid, "studyPlan", "current")).catch((e) =>
-                            console.error("Failed to clear study plan from Firestore:", e)
-                          );
-                        }
-                      }}
-                      style={{ fontSize: 12, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}
-                    >
-                      Change exam date
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 14 }}>Built from your real doubt history — weak topics prioritized first</div>
+              ) : studyPlanStep === "plan" ? (() => {
+                const allSubjects = [...new Set(studyPlan.map((d) => d.subject))];
+                const totalTasks = studyPlan.reduce((sum, d) => sum + (d.tasks?.length || 0), 0);
+                const completedCount = Object.keys(studyPlanCompletedTasks).length;
+                const overallPercent = totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
+                const subjectStats = allSubjects.map((subj) => {
+                  const subjDays = studyPlan.filter((d) => d.subject === subj);
+                  const subjTotal = subjDays.reduce((sum, d) => sum + (d.tasks?.length || 0), 0);
+                  const subjDone = subjDays.reduce((sum, d) => sum + (d.tasks || []).filter((_, ti) => studyPlanCompletedTasks[`${d.day}-${ti}`]).length, 0);
+                  return { subject: subj, percent: subjTotal > 0 ? Math.round((subjDone / subjTotal) * 100) : 0, done: subjDone, total: subjTotal };
+                });
+                const daysSinceGenerated = studyPlanGeneratedAt ? Math.floor((Date.now() - studyPlanGeneratedAt) / 86400000) + 1 : 1;
+                const currentDay = studyPlan.find((d) => d.day === selectedStudyDay) || studyPlan[0];
+                const topWeakTopic = analyzeWeakTopics();
+                const focusEntry = Object.entries(topWeakTopic).sort((a, b) => (b[1][0]?.count || 0) - (a[1][0]?.count || 0))[0];
+                const RING_R = 44, RING_C = 2 * Math.PI * 44;
 
-                  {/* Progress bar */}
-                  <div style={{ marginBottom: 20 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 700, color: "#8C7D6B" }}>{studyPlanCompletedDays.length} of {studyPlan.length} days done</span>
-                      <span style={{ fontSize: 11.5, fontWeight: 700, color: "#8F6A08" }}>{Math.round((studyPlanCompletedDays.length / studyPlan.length) * 100)}%</span>
+                return (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 8 }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018" }}>Your {studyPlan.length}-Day Plan</div>
+                      <div
+                        onClick={() => {
+                          localStorage.removeItem("ibuddie_exam_date");
+                          setStudyExamDate("");
+                          setStudyPlan([]);
+                          setStudyPlanCompletedTasks({});
+                          setStudyPlanStep("setup");
+                          if (user?.uid) {
+                            deleteDoc(doc(db, "users", user.uid, "studyPlan", "current")).catch((e) =>
+                              console.error("Failed to clear study plan from Firestore:", e)
+                            );
+                          }
+                        }}
+                        style={{ fontSize: 12, color: "#8C7D6B", cursor: "pointer", textDecoration: "underline" }}
+                      >
+                        Change exam date
+                      </div>
                     </div>
-                    <div style={{ height: 6, borderRadius: 999, background: "#E4E2DA", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${(studyPlanCompletedDays.length / studyPlan.length) * 100}%`, background: ACCENT, borderRadius: 999, transition: "width 0.2s ease" }} />
-                    </div>
-                  </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-                    {studyPlan.map((d, i) => {
-                      // Which plan day number corresponds to today, based on when the plan was generated
-                      const daysSinceGenerated = studyPlanGeneratedAt ? Math.floor((Date.now() - studyPlanGeneratedAt) / 86400000) + 1 : null;
-                      const isToday = daysSinceGenerated === d.day;
-                      const isDone = studyPlanCompletedDays.includes(d.day);
-                      const isExpanded = expandedStudyDay === null ? isToday : expandedStudyDay === d.day;
-                      return (
-                        <div
-                          key={i}
-                          style={{
-                            borderRadius: 12, overflow: "hidden",
-                            border: isToday ? `1.5px solid ${ACCENT}` : "1px solid #E4E2DA",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex", gap: 14, padding: "14px 16px", cursor: "pointer",
-                              background: isToday ? "#B8860B0D" : isDone ? "#F2F2F0" : "#F9F9F7",
-                              opacity: isDone ? 0.7 : 1,
-                            }}
-                            onClick={() => setExpandedStudyDay(isExpanded ? -1 : d.day)}
-                          >
-                            <div
-                              onClick={(e) => { e.stopPropagation(); toggleStudyDayComplete(d.day); }}
-                              style={{
-                                width: 40, height: 40, borderRadius: 10, flexShrink: 0, cursor: "pointer",
-                                background: isDone ? "#2F6B4A" : "#B8860B14", color: isDone ? "#fff" : "#8F6A08",
-                                fontSize: 12, fontWeight: 800, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                              }}
-                            >
-                              {isDone ? <CheckCircle2 size={18} /> : (
-                                <>
-                                  <div style={{ fontSize: 8, fontWeight: 700 }}>DAY</div>
-                                  {d.day}
-                                </>
-                              )}
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: "#8F6A08", textTransform: "uppercase" }}>{d.subject}</div>
-                                {isToday && !isDone && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: ACCENT, padding: "1px 7px", borderRadius: 999 }}>TODAY</span>}
-                                {d.difficulty && <span style={{ fontSize: 9, fontWeight: 700, color: "#8C7D6B", background: "#FFFFFF", border: "1px solid #E4E2DA", padding: "1px 7px", borderRadius: 999 }}>{d.difficulty}</span>}
-                              </div>
-                              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#2B2018", marginBottom: 2, textDecoration: isDone ? "line-through" : "none" }}>{d.topic || d.focus}</div>
-                              {d.timeEstimate && <div style={{ fontSize: 11, color: "#8C7D6B" }}>~{d.timeEstimate}</div>}
-                            </div>
-                            <ChevronDown size={16} color="#8C7D6B" style={{ flexShrink: 0, marginTop: 3, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }} />
-                          </div>
-                          {isExpanded && (
-                            <div style={{ padding: "0 16px 16px 70px" }}>
-                              {d.tasks && d.tasks.length > 0 && (
-                                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-                                  {d.tasks.map((task, ti) => (
-                                    <div key={ti} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, color: "#2B2018" }}>
-                                      <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#B8860B", marginTop: 6, flexShrink: 0 }} />
-                                      {task}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {d.note && <div style={{ fontSize: 11.5, color: "#8C7D6B", fontStyle: "italic" }}>{d.note}</div>}
-                            </div>
-                          )}
+                    {/* Overall progress ring + subject breakdown */}
+                    <div style={{ display: "flex", gap: 24, alignItems: "center", marginBottom: 24, flexWrap: "wrap" }}>
+                      <div style={{ position: "relative", width: 110, height: 110, flexShrink: 0 }}>
+                        <svg width={110} height={110} style={{ transform: "rotate(-90deg)" }}>
+                          <circle cx={55} cy={55} r={RING_R} fill="none" stroke="#E4E2DA" strokeWidth={10} />
+                          <circle
+                            cx={55} cy={55} r={RING_R} fill="none" stroke={ACCENT} strokeWidth={10} strokeLinecap="round"
+                            strokeDasharray={RING_C} strokeDashoffset={RING_C - (overallPercent / 100) * RING_C}
+                            style={{ transition: "stroke-dashoffset 0.3s ease" }}
+                          />
+                        </svg>
+                        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: "#2B2018" }}>{overallPercent}%</div>
+                          <div style={{ fontSize: 9, color: "#8C7D6B" }}>{completedCount}/{totalTasks} tasks</div>
                         </div>
-                      );
-                    })}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: 10 }}>
+                        {subjectStats.map((s) => (
+                          <div key={s.subject}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: "#2B2018" }}>{s.subject}</span>
+                              <span style={{ fontSize: 11, color: "#8C7D6B" }}>{s.done}/{s.total}</span>
+                            </div>
+                            <div style={{ height: 5, borderRadius: 999, background: "#E4E2DA", overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${s.percent}%`, background: ACCENT, borderRadius: 999 }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Week strip */}
+                    <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8, marginBottom: 18 }}>
+                      {studyPlan.map((d) => {
+                        const dayTotal = d.tasks?.length || 0;
+                        const dayDone = (d.tasks || []).filter((_, ti) => studyPlanCompletedTasks[`${d.day}-${ti}`]).length;
+                        const isFullyDone = dayTotal > 0 && dayDone === dayTotal;
+                        const isSelected = selectedStudyDay === d.day;
+                        const isToday = daysSinceGenerated === d.day;
+                        return (
+                          <div
+                            key={d.day}
+                            onClick={() => setSelectedStudyDay(d.day)}
+                            style={{
+                              flexShrink: 0, width: 52, padding: "8px 0", borderRadius: 10, textAlign: "center", cursor: "pointer",
+                              background: isSelected ? ACCENT : "#F9F9F7",
+                              border: isToday && !isSelected ? `1.5px solid ${ACCENT}` : "1px solid #E4E2DA",
+                            }}
+                          >
+                            <div style={{ fontSize: 9, fontWeight: 700, color: isSelected ? "#fff" : "#8C7D6B" }}>DAY</div>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: isSelected ? "#fff" : "#2B2018", marginBottom: 3 }}>{d.day}</div>
+                            {isFullyDone ? (
+                              <CheckCircle2 size={12} color={isSelected ? "#fff" : "#2F6B4A"} style={{ margin: "0 auto" }} />
+                            ) : (
+                              <div style={{ width: 5, height: 5, borderRadius: "50%", margin: "0 auto", background: isSelected ? "#fff" : "#E4E2DA" }} />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Selected day detail */}
+                    {currentDay && (
+                      <div style={{ border: "1px solid #E4E2DA", borderRadius: 14, padding: 18, marginBottom: 18 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#8F6A08", textTransform: "uppercase" }}>{currentDay.subject}</div>
+                          {currentDay.difficulty && <span style={{ fontSize: 9, fontWeight: 700, color: "#8C7D6B", background: "#F9F9F7", border: "1px solid #E4E2DA", padding: "1px 7px", borderRadius: 999 }}>{currentDay.difficulty}</span>}
+                        </div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#2B2018", marginBottom: 2 }}>{currentDay.topic || currentDay.focus}</div>
+                        {currentDay.timeEstimate && <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 14 }}>~{currentDay.timeEstimate}</div>}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: currentDay.note ? 12 : 0 }}>
+                          {(currentDay.tasks || []).map((task, ti) => {
+                            const done = !!studyPlanCompletedTasks[`${currentDay.day}-${ti}`];
+                            return (
+                              <div
+                                key={ti}
+                                onClick={() => toggleStudyTaskComplete(currentDay.day, ti)}
+                                style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 12px", borderRadius: 9, cursor: "pointer", background: done ? "#F2F2F0" : "#F9F9F7", border: "1px solid #E4E2DA" }}
+                              >
+                                {done ? <CheckCircle2 size={17} color="#2F6B4A" style={{ flexShrink: 0 }} /> : <div style={{ width: 17, height: 17, borderRadius: "50%", border: "1.5px solid #E4E2DA", flexShrink: 0 }} />}
+                                <span style={{ fontSize: 12.5, color: "#2B2018", textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{task}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {currentDay.note && <div style={{ fontSize: 11.5, color: "#8C7D6B", fontStyle: "italic" }}>{currentDay.note}</div>}
+                      </div>
+                    )}
+
+                    {/* Focus topic */}
+                    {focusEntry && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderRadius: 14, background: "#B8860B0D", border: `1px solid ${ACCENT}33`, marginBottom: 18 }}>
+                        <Target size={22} color="#B8860B" style={{ flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{focusEntry[1][0]?.topic}</div>
+                          <div style={{ fontSize: 11.5, color: "#8C7D6B" }}>You're weakest here — asked about it {focusEntry[1][0]?.count}x</div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const subj = SUBJECTS.find((s) => s.label === focusEntry[0]);
+                            if (subj) setSubject(subj.id);
+                            setInput(`Can you help me understand ${focusEntry[1][0]?.topic}?`);
+                            setView("doubt");
+                          }}
+                          style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer", flexShrink: 0 }}
+                        >
+                          Start Now
+                        </button>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={generateStudyPlan}
+                      style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                    >
+                      <RotateCcw size={15} /> Regenerate Plan
+                    </button>
                   </div>
-                  <button
-                    onClick={generateStudyPlan}
-                    style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF", color: "#2B2018", fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-                  >
-                    <RotateCcw size={15} /> Regenerate Plan
-                  </button>
-                </div>
-              ) : (() => {
+                );
+              })() : (() => {
                 const weakTopics = analyzeWeakTopics();
                 const hasData = Object.keys(weakTopics).length > 0;
                 const examHasPassed = new Date(studyExamDate) <= new Date();
