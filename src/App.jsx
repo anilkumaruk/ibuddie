@@ -1538,54 +1538,6 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
         )}
 
         <div style={{ flex: 1 }} />
-        {sidebarOpen && (() => {
-          const m = MODELS[selectedModel];
-          const isSubbed = m.upgradable && subscriptions[selectedModel]?.active;
-          const periodLabel = m.period === "month" ? "this month" : "today";
-          if (isSubbed) {
-            return (
-              <div style={{ background: "linear-gradient(160deg, #1A1A1A, #3A3A3A)", borderRadius: 16, padding: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <Crown size={16} color="#FFFFFF" />
-                  <span style={{ color: "#FFFFFF", fontWeight: 700, fontSize: 13.5 }}>{m.label} Pro active</span>
-                </div>
-                <div style={{ color: "#EDEDE9", fontSize: 11.5, marginTop: 6 }}>Auto-renews monthly. Unlimited {m.label} doubts until then.</div>
-                <div
-                  onClick={() => cancelBusy !== selectedModel && handleCancelSubscription(selectedModel)}
-                  style={{ color: "#B0AAA0", fontSize: 11, marginTop: 10, cursor: cancelBusy === selectedModel ? "default" : "pointer", textDecoration: "underline" }}
-                >
-                  {cancelBusy === selectedModel ? "Cancelling…" : "Cancel auto-renewal"}
-                </div>
-              </div>
-            );
-          }
-          if (!m.upgradable) {
-            return (
-              <div style={{ background: "linear-gradient(160deg, #1A1A1A, #3A3A3A)", borderRadius: 16, padding: 16 }}>
-                <div style={{ color: "#FFFFFF", fontWeight: 700, fontSize: 13.5, marginBottom: 6 }}>{m.label}</div>
-                <div style={{ color: "#EDEDE9", fontSize: 11.5 }}>{usageCounts[selectedModel]}/{m.freeLimit} free doubts used {periodLabel}</div>
-              </div>
-            );
-          }
-          return (
-            <div style={{ background: "linear-gradient(160deg, #1A1A1A, #3A3A3A)", borderRadius: 16, padding: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                <Crown size={16} color="#FFFFFF" />
-                <span style={{ color: "#FFFFFF", fontWeight: 700, fontSize: 13.5 }}>{m.label} Pro</span>
-              </div>
-              <div style={{ color: "#EDEDE9", fontSize: 11.5, marginBottom: 8 }}>{usageCounts[selectedModel]}/{m.freeLimit} free {m.label} doubts used {periodLabel}</div>
-              {["Unlimited doubts", "Priority support"].map((f) => (
-                <div key={f} style={{ color: "#EDEDE9", fontSize: 12, marginBottom: 5 }}>✓ {f}</div>
-              ))}
-              <div
-                onClick={() => { setUpgradeModel(selectedModel); setUpgradeOpen(true); }}
-                style={{ background: "#FFFFFF", color: "#1A1A1A", textAlign: "center", borderRadius: 9, padding: "8px 0", fontWeight: 700, fontSize: 12.5, marginTop: 10, cursor: "pointer" }}
-              >
-                Upgrade Now →
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
       {/* Main */}
@@ -1602,6 +1554,18 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
+              {!isMobile && MODEL_ORDER.some((k) => subscriptions[k]?.active) && (
+                <div
+                  onClick={() => setSettingsOpen(true)}
+                  style={{ display: "flex", alignItems: "center", gap: 6, background: "#FFFFFF", padding: "5px 12px", borderRadius: 999, boxShadow: "0 1px 4px rgba(20,15,5,0.25)", cursor: "pointer" }}
+                >
+                  {MODEL_ORDER.filter((k) => subscriptions[k]?.active).map((k) => (
+                    <span key={k} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, fontWeight: 700, color: "#2B2018" }}>
+                      <Crown size={11} color="#B8860B" /> iBuddie {MODELS[k].label}
+                    </span>
+                  ))}
+                </div>
+              )}
               {user?.uid && (
                 <div
                   onClick={() => setAchievementsOpen(true)}
@@ -2908,10 +2872,47 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               onClick={() => setSettingsOpen(false)}
               style={{ position: "fixed", inset: 0, background: "rgba(20,15,10,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
             >
-              <div onClick={(e) => e.stopPropagation()} style={{ background: "#FFFFFF", borderRadius: 18, padding: 24, width: 340 }}>
+              <div onClick={(e) => e.stopPropagation()} style={{ background: "#FFFFFF", borderRadius: 18, padding: 24, width: 340, maxHeight: "85vh", overflowY: "auto" }}>
                 <div style={{ fontSize: 16, fontWeight: 700, color: "#2B2018", marginBottom: 16 }}>Settings</div>
                 <div style={{ fontSize: 12.5, color: "#8C7D6B", marginBottom: 4 }}>Signed in as</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "#2B2018", marginBottom: 18 }}>{user?.name || "—"}</div>
+
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8C7D6B", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10, paddingTop: 10, borderTop: "1px solid #E4E2DA" }}>Subscriptions</div>
+                {MODEL_ORDER.map((key) => {
+                  const m = MODELS[key];
+                  const isSubbed = m.upgradable && subscriptions[key]?.active;
+                  const periodLabel = m.period === "month" ? "this month" : "today";
+                  return (
+                    <div key={key} style={{ padding: "12px", borderRadius: 12, background: isSubbed ? "linear-gradient(160deg, #1A1A1A, #3A3A3A)" : "#F9F9F7", border: isSubbed ? "none" : "1px solid #E4E2DA", marginBottom: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        {isSubbed && <Crown size={14} color="#FFFFFF" />}
+                        <span style={{ color: isSubbed ? "#FFFFFF" : "#2B2018", fontWeight: 700, fontSize: 13 }}>iBuddie {m.label}</span>
+                      </div>
+                      {isSubbed ? (
+                        <>
+                          <div style={{ color: "#EDEDE9", fontSize: 11 }}>Pro active · auto-renews monthly</div>
+                          <div
+                            onClick={() => cancelBusy !== key && handleCancelSubscription(key)}
+                            style={{ color: "#B0AAA0", fontSize: 10.5, marginTop: 6, cursor: cancelBusy === key ? "default" : "pointer", textDecoration: "underline" }}
+                          >
+                            {cancelBusy === key ? "Cancelling…" : "Cancel auto-renewal"}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ color: "#8C7D6B", fontSize: 11, marginBottom: 8 }}>{usageCounts[key]}/{m.freeLimit} free doubts used {periodLabel}</div>
+                          <div
+                            onClick={() => { setSettingsOpen(false); setUpgradeModel(key); setUpgradeOpen(true); }}
+                            style={{ background: ACCENT, color: "#fff", textAlign: "center", borderRadius: 8, padding: "7px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}
+                          >
+                            Upgrade — {m.priceDisplay}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+
                 <div style={{ padding: "10px 0", borderTop: "1px solid #E4E2DA" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: "#2B2018" }}>"Hey Darling" wake word</div>
