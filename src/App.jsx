@@ -1563,7 +1563,14 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               }}
             >
               <item.icon size={17} />
-              {sidebarOpen && item.label}
+              {sidebarOpen && (
+                <>
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.key === "doubt" && (
+                    <Plus size={15} color={view === item.key ? "#FFFFFF" : "#8C7D6B"} style={{ flexShrink: 0 }} />
+                  )}
+                </>
+              )}
             </div>
           ))}
         </div>
