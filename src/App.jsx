@@ -597,7 +597,13 @@ export default function App({ user, onLogout }) {
           difficulty: mockTestDifficulty,
         }),
       });
-      const data = await res.json();
+      const rawBody = await res.text();
+      let data;
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        throw new Error("The server had trouble generating this test. Please try again in a moment.");
+      }
       if (!res.ok || !data.questions) throw new Error(data.error || `Server error (${res.status})`);
 
       consumeUsage();
