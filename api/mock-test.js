@@ -8,10 +8,13 @@ export default async function handler(req) {
   }
 
   const { subject, exam, count, model, chapter, difficulty } = await req.json();
-  const n = Math.min(Math.max(parseInt(count, 10) || 5, 3), 15);
   const modelId = model === "sonnet" ? "claude-sonnet-5" : "claude-haiku-4-5-20251001";
 
   const level = ["easy", "medium", "hard"].includes(difficulty) ? difficulty : "medium";
+  // Hard questions carry a much heavier private "scratch" derivation, so a large
+  // batch can push total generation time past the platform's response deadline.
+  // Cap Hard batches smaller so they reliably finish; Easy/Medium can go up to 15.
+  const n = Math.min(Math.max(parseInt(count, 10) || 5, 3), level === "hard" ? 8 : 15);
   const difficultyLine = {
     easy: `EASY difficulty: direct, single-concept recall and straightforward application of one well-known formula. No multi-step reasoning or tricky wording. Should be comfortably answerable by a student who has just learned the topic.`,
     medium: `MEDIUM difficulty: standard ${exam} exam level — a mix of direct recall and one or two-step application/numerical problems, similar to what shows up most often in the real exam.`,
@@ -30,15 +33,15 @@ Prefer numeric or ratio-style final answers over conceptual one-word answers. If
   const needsScratch = level === "hard";
 
   const scratchInstructions = needsScratch
-    ? `Each question needs a "scratch" field where you actually work through the problem step by step — do your real thinking there, including any false starts or corrections. That field is private and is stripped out before students ever see it, so use it freely.
+    ? `Each question needs a "scratch" field where you work through the problem step by step to reach the right answer. Keep it tight — short lines of actual working (equations, substitutions), under 50 words total, not full prose paragraphs. That field is private and is stripped out before students ever see it.
 
-CRITICAL RULE ABOUT THE "explanation" FIELD: this one IS shown to students as the final answer key. Only write it after "scratch" is completely finished and you're sure of the answer. It must contain ONLY the clean, correct, one-to-two-sentence final solution — never any hedging, false starts, or corrections (no "wait", "actually", "let me recheck", "recalculating", "hmm", or restating an earlier wrong step). All of that thinking belongs in "scratch", never in "explanation". Also make sure correctIndex matches the conclusion you actually reached in "scratch", not an earlier guess.
+CRITICAL RULE ABOUT THE "explanation" FIELD: this one IS shown to students as the final answer key. Only write it after "scratch" is completely finished and you're sure of the answer. It must contain ONLY the clean, correct, one-sentence final solution — never any hedging, false starts, or corrections (no "wait", "actually", "let me recheck", "recalculating", "hmm", or restating an earlier wrong step). All of that thinking belongs in "scratch", never in "explanation". Also make sure correctIndex matches the conclusion you actually reached in "scratch", not an earlier guess.
 `
     : `The "explanation" field must be ONLY the clean, correct, one-to-two-sentence final solution — never hedging or visible re-working such as "wait", "actually", or "recalculating".
 `;
 
   const jsonShape = needsScratch
-    ? `{"question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "scratch": "your real step-by-step working, private, can be messy", "explanation": "clean final solution only, one to two sentences", "topic": "short topic name, e.g. 'Kinematics'", "difficulty": "${level}"}`
+    ? `{"question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "scratch": "brief step-by-step working, private, under 50 words", "explanation": "clean final solution only, one to two sentences", "topic": "short topic name, e.g. 'Kinematics'", "difficulty": "${level}"}`
     : `{"question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "clean final solution only, one to two sentences", "topic": "short topic name, e.g. 'Kinematics'", "difficulty": "${level}"}`;
 
   const systemPrompt = `You are a question-generator for iBuddie, an exam-prep app for Indian students.
@@ -56,7 +59,7 @@ correctIndex is the 0-based index (0-3) of the correct option in "options". Keep
   // returning an HTML/plain-text error page that breaks the frontend's
   // res.json() parse.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), 25000);
 
   try {
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
