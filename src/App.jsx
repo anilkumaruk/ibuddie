@@ -199,6 +199,7 @@ export default function App({ user, onLogout }) {
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,
   });
   const [mockTestMode, setMockTestMode] = useState("full"); // "full" | "chapter"
+  const [mockTestDifficulty, setMockTestDifficulty] = useState("medium"); // "easy" | "medium" | "hard"
   const [mockTestChapter, setMockTestChapter] = useState("");
   const [mockTestPucYear, setMockTestPucYear] = useState("2nd"); // "1st" | "2nd" — only relevant for chapter mode
   const [mockTestHistory, setMockTestHistory] = useState([]); // real past attempts loaded from Firestore
@@ -593,6 +594,7 @@ export default function App({ user, onLogout }) {
           count: mockTest.count,
           model: selectedModel,
           chapter: mockTestMode === "chapter" ? mockTestChapter : undefined,
+          difficulty: mockTestDifficulty,
         }),
       });
       const data = await res.json();
@@ -628,7 +630,7 @@ export default function App({ user, onLogout }) {
         else if (q.topic) wrongTopics.push(q.topic);
       });
 
-      const result = { subject: currentSubject.label, exam, score, total: prev.questions.length, wrongTopics, chapter: mockTestMode === "chapter" ? mockTestChapter : null, ts: Date.now() };
+      const result = { subject: currentSubject.label, exam, score, total: prev.questions.length, wrongTopics, chapter: mockTestMode === "chapter" ? mockTestChapter : null, difficulty: mockTestDifficulty, ts: Date.now() };
       setMockTestHistory((h) => [result, ...h].slice(0, 30));
 
       if (user?.uid) {
@@ -2062,6 +2064,31 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                       </div>
                     </div>
 
+                    {/* Difficulty selector */}
+                    <div style={{ textAlign: "center", marginBottom: 20 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8C7D6B", marginBottom: 10 }}>Difficulty</div>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                        {[
+                          { id: "easy", label: "Easy", color: "#2F6B4A" },
+                          { id: "medium", label: "Medium", color: "#B8860B" },
+                          { id: "hard", label: "Hard", color: "#B23B3B" },
+                        ].map((d) => (
+                          <div
+                            key={d.id}
+                            onClick={() => setMockTestDifficulty(d.id)}
+                            style={{
+                              flex: 1, maxWidth: 120, padding: "10px 12px", borderRadius: 10, cursor: "pointer", textAlign: "center", fontSize: 13, fontWeight: 700,
+                              border: mockTestDifficulty === d.id ? `1.5px solid ${d.color}` : "1px solid #E4E2DA",
+                              background: mockTestDifficulty === d.id ? `${d.color}14` : "#FFFFFF",
+                              color: mockTestDifficulty === d.id ? d.color : "#2B2018",
+                            }}
+                          >
+                            {d.label}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
                     {mockTestMode === "chapter" && (
                       <div style={{ marginBottom: 20 }}>
                         <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 12 }}>
@@ -2148,7 +2175,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                                   {pct}%
                                 </div>
                                 <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{r.subject}{r.chapter ? ` · ${r.chapter}` : ""} · {r.score}/{r.total}</div>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{r.subject}{r.chapter ? ` · ${r.chapter}` : ""} · {r.score}/{r.total}{r.difficulty ? ` · ${r.difficulty[0].toUpperCase()}${r.difficulty.slice(1)}` : ""}</div>
                                   <div style={{ fontSize: 11, color: "#8C7D6B" }}>{new Date(r.ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
                                 </div>
                                 {r.wrongTopics && r.wrongTopics.length > 0 && (
