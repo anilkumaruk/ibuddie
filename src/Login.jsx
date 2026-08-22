@@ -80,7 +80,9 @@ export default function Login({ onLogin }) {
       setMode("otp");
     } catch (e) {
       console.error("OTP send error:", e.code, e.message);
-      setError(`Couldn't send OTP: ${e.code || e.message}`);
+      // Show the full server message too (not just the error code) — Firebase's
+      // detailed reason (e.g. which exact check failed) lives in e.message.
+      setError(`Couldn't send OTP: ${e.code || "error"} — ${e.message || "no further detail"}`);
     } finally {
       setBusy(false);
     }
