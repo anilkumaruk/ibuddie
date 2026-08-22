@@ -174,11 +174,11 @@ export default function VoiceCallModal({
     vivaEndedRef.current = false;
     updatePhase("greeting");
     if (mode === "viva") {
-      startViva();
+      startViva(); // handles its own warm-up internally — see startViva()
     } else {
       runGreeting();
+      warmUpVoiceService(); // fire-and-forget — gets Cloud Run awake in the background while the cached greeting plays
     }
-    warmUpVoiceService(); // fire-and-forget — gets Cloud Run awake in the background while the cached greeting plays
 
     return () => {
       hardStop();
@@ -195,7 +195,10 @@ export default function VoiceCallModal({
   // full cold-start delay instead. This silently pings it in the background so it's already
   // warm by the time an actual response needs to be spoken.
   function warmUpVoiceService() {
-    fetch("/api/text-to-speech", {
+    // Returns the promise (rather than being purely fire-and-forget) so Voice Viva's opening
+    // can explicitly await it — see startViva(). The general call flow still just calls this
+    // without awaiting, unchanged.
+    return fetch("/api/text-to-speech", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: ".", languageCode: voiceLang }),
@@ -469,6 +472,13 @@ export default function VoiceCallModal({
     if (stoppedRef.current) return;
     updatePhase("thinking");
     ensureAnalyser();
+    // Unlike the general call — which plays an instant cached greeting file first, giving
+    // Cloud Run a head start to wake up in the background — Viva's opening line IS the very
+    // first real request of the session, with nothing to absorb a cold start. Explicitly wait
+    // for the warm-up ping to land first so the real TTS request right after doesn't race a
+    // cold instance and time out (504).
+    await warmUpVoiceService();
+    if (stoppedRef.current || vivaEndedRef.current) return;
     try {
       const answerText = await streamAndSpeak(
         "Begin the viva now.",
