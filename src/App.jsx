@@ -37,6 +37,15 @@ const SUBJECTS = [
 
 const EXAMS = ["NEET", "JEE", "KCET"];
 
+const VIVA_PURPOSES = [
+  { id: "neet", label: "NEET" },
+  { id: "jee", label: "JEE" },
+  { id: "kcet", label: "KCET" },
+  { id: "boards", label: "Boards" },
+  { id: "college", label: "College Viva" },
+  { id: "interview", label: "Interview Prep" },
+];
+
 // Real, checkable milestones based on actual activity — no vanity numbers.
 // Returns YYYY-MM-DD for the user's actual LOCAL calendar day — never use toISOString()
 // for this, since that's always UTC and would miscalculate "today" for IST (UTC+5:30)
@@ -124,6 +133,7 @@ const PUC_SYLLABUS = {
 const NAV_ITEMS = [
   { key: "doubt", label: "Doubt Desk", icon: ClipboardCheck },
   { key: "studywithme", label: "Study With Me", icon: Timer },
+  { key: "voiceviva", label: "Voice Viva", icon: Mic },
   { key: "mocktest", label: "Daily Mock Test", icon: Calendar },
   { key: "topics", label: "Important Topics", icon: BookMarked },
   { key: "pyq", label: "PYQ Bank", icon: FileQuestion },
@@ -245,6 +255,8 @@ export default function App({ user, onLogout }) {
     topic: "",
     secondsLeft: 0,
   });
+  const [vivaCallOpen, setVivaCallOpen] = useState(false);
+  const [vivaSetup, setVivaSetup] = useState({ subjectId: "physics", topic: "", purpose: "neet" });
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -1744,7 +1756,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "voiceviva" ? "VOICE VIVA" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -2256,6 +2268,78 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Voice Viva card */}
+          {view === "voiceviva" && (
+            <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+              <div style={{ margin: "auto", textAlign: "center", maxWidth: 380, width: "100%" }}>
+                <Mic size={28} color="#B8860B" style={{ marginBottom: 14 }} />
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Voice Viva Mode</div>
+                <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>
+                  iBuddie asks questions out loud, listens to your spoken answer, and immediately follows up — a real oral exam, hands-free.
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                  {SUBJECTS.filter((s) => s.id !== "general").map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setVivaSetup((prev) => ({ ...prev, subjectId: s.id }))}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10,
+                        border: vivaSetup.subjectId === s.id ? `1.5px solid ${ACCENT}` : "1px solid #E4E2DA",
+                        background: vivaSetup.subjectId === s.id ? "#17140F0D" : "#FFFFFF",
+                        color: "#2B2018", fontWeight: 600, fontSize: 12.5, cursor: "pointer",
+                      }}
+                    >
+                      <s.icon size={14} /> {s.label}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  type="text"
+                  value={vivaSetup.topic}
+                  onChange={(e) => setVivaSetup((prev) => ({ ...prev, topic: e.target.value }))}
+                  placeholder="Narrow it down? (e.g. Current Electricity) — optional"
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #E4E2DA", fontSize: 13.5, color: "#2B2018", marginBottom: 20, boxSizing: "border-box" }}
+                />
+
+                <div style={{ fontSize: 11.5, color: "#8C7D6B", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 8 }}>What's this for?</div>
+                <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+                  {VIVA_PURPOSES.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setVivaSetup((prev) => ({ ...prev, purpose: p.id }))}
+                      style={{
+                        padding: "8px 14px", borderRadius: 10,
+                        border: vivaSetup.purpose === p.id ? "none" : "1px solid #E4E2DA",
+                        background: vivaSetup.purpose === p.id ? ACCENT : "#FFFFFF",
+                        color: vivaSetup.purpose === p.id ? "#fff" : "#2B2018",
+                        fontWeight: 700, fontSize: 12.5, cursor: "pointer",
+                      }}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => {
+                    const isProUser = MODEL_ORDER.some((key) => subscriptions[key]?.active);
+                    if (isProUser) setVivaCallOpen(true);
+                    else {
+                      setUpgradeModel(selectedModel);
+                      setUpgradeOpen(true);
+                    }
+                  }}
+                  style={{ width: "100%", padding: "13px 0", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                >
+                  <Mic size={16} /> 🎙️ Viva Me
+                </button>
+                <div style={{ fontSize: 11, color: "#8C7D6B", marginTop: 12 }}>Requires an active iBuddie subscription — this uses live voice, same as Voice Call.</div>
+              </div>
             </div>
           )}
 
@@ -3629,13 +3713,17 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
         analyserRef={analyserRef}
       />
       <VoiceCallModal
-        open={voiceCallOpen}
-        onClose={() => setVoiceCallOpen(false)}
+        open={voiceCallOpen || vivaCallOpen}
+        onClose={() => { setVoiceCallOpen(false); setVivaCallOpen(false); }}
         voiceLang={voiceLang}
         subject={subject}
         exam={exam}
         subjectLabel={currentSubject.label}
         activeModel={MODEL_ORDER.find((key) => subscriptions[key]?.active) || selectedModel}
+        mode={vivaCallOpen ? "viva" : "chat"}
+        vivaSubjectLabel={SUBJECTS.find((s) => s.id === vivaSetup.subjectId)?.label || "General Science"}
+        vivaTopic={vivaSetup.topic}
+        vivaPurpose={vivaSetup.purpose}
       />
     </div>
   );

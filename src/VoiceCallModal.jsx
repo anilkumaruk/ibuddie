@@ -118,11 +118,29 @@ async function playBlobsInOrder(blobPromises, stoppedFlagRef, playerRef, ctxRef,
   }
 }
 
-export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam, subjectLabel, activeModel }) {
+// Purpose-specific framing for Voice Viva mode's oral-exam style — used to flavor the
+// system prompt, not to change the underlying mechanics.
+const VIVA_PURPOSE_TEXT = {
+  neet: "a NEET oral drilling session",
+  jee: "a JEE oral drilling session",
+  kcet: "a KCET oral drilling session",
+  boards: "a school Boards oral exam",
+  college: "a college viva-voce",
+  interview: "an interview preparation session",
+};
+
+export default function VoiceCallModal({
+  open, onClose, voiceLang, subject, exam, subjectLabel, activeModel,
+  mode = "chat", // "chat" | "viva"
+  vivaSubjectLabel, vivaTopic, vivaPurpose,
+}) {
   const [phase, setPhase] = useState("greeting");
   const [lastHeard, setLastHeard] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [conversationHistory, setConversationHistory] = useState([]); // [{ role: "user" | "assistant", text }]
+  const [questionCount, setQuestionCount] = useState(0); // viva mode only — number of questions asked so far
+  const [showSummary, setShowSummary] = useState(false); // viva mode only — session ended, showing feedback
+  const [vivaSummary, setVivaSummary] = useState(null); // null while loading, then the feedback text
   const historyEndRef = useRef(null);
 
   const phaseRef = useRef("greeting");
@@ -132,6 +150,9 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
   const finalTranscriptRef = useRef(""); // the live-building transcript for the current turn
   const carryOverPrefixRef = useRef(""); // text preserved from a prior session that ended early mid-turn
   const deliberateStopRef = useRef(false);
+  const vivaEndedRef = useRef(false); // viva mode only — permanently true once endViva() starts, so an
+  // in-flight askAndRespond/startViva call that resolves after the student ended the session
+  // can't resurrect listening underneath the summary screen.
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const audioPlayerRef = useRef(null);
@@ -147,8 +168,16 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     setErrorMsg("");
     setLastHeard("");
     setConversationHistory([]);
+    setQuestionCount(0);
+    setShowSummary(false);
+    setVivaSummary(null);
+    vivaEndedRef.current = false;
     updatePhase("greeting");
-    runGreeting();
+    if (mode === "viva") {
+      startViva();
+    } else {
+      runGreeting();
+    }
     warmUpVoiceService(); // fire-and-forget — gets Cloud Run awake in the background while the cached greeting plays
 
     return () => {
@@ -319,12 +348,12 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
         updatePhase("error");
         return;
       }
-      if (!stoppedRef.current) startListening();
+      if (!stoppedRef.current && !vivaEndedRef.current) startListening();
     };
 
     recognition.onend = () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (stoppedRef.current) return;
+      if (stoppedRef.current || vivaEndedRef.current) return;
       if (recognitionRef.current !== recognition) return; // a newer session already took over
 
       const text = finalTranscriptRef.current.trim();
@@ -338,9 +367,13 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
         return;
       }
       if (isExitPhrase(text)) {
-        speakText(CLOSINGS[voiceLang] || CLOSINGS["en-IN"]).then(() => {
-          if (!stoppedRef.current) handleEndCall();
-        });
+        if (mode === "viva") {
+          endViva();
+        } else {
+          speakText(CLOSINGS[voiceLang] || CLOSINGS["en-IN"]).then(() => {
+            if (!stoppedRef.current) handleEndCall();
+          });
+        }
         return;
       }
       askAndRespond(text);
@@ -355,88 +388,182 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
     }
   }
 
+  function buildVivaSystemPrompt(isOpening) {
+    const purposeText = VIVA_PURPOSE_TEXT[vivaPurpose] || "an oral exam";
+    const topicPart = vivaTopic ? ` (focused specifically on: ${vivaTopic})` : "";
+    if (isOpening) {
+      return `You are about to conduct ${purposeText} with a student, live and spoken aloud, on the subject of ${vivaSubjectLabel}${topicPart}. In 1-2 short spoken sentences: briefly greet the student, then ask your first question. Speak naturally, the way a real examiner talks out loud — no markdown, no lists, no headers. Default to English unless the conversation clearly continues in Kannada.`;
+    }
+    return `You are conducting ${purposeText} with a student, live and spoken aloud, on the subject of ${vivaSubjectLabel}${topicPart}. You have just heard the student's spoken answer to your previous question. Respond in 2-4 short spoken sentences: first briefly say whether their answer was correct, partially correct, or incorrect, and why, in one sentence; then immediately ask exactly one new question that naturally follows up — either probing their last answer more deeply, or moving to a closely related point. Never ask more than one question in a turn, and never skip asking a question. Speak the way a real examiner talks out loud — warm but exacting, no markdown, no lists, no headers. If the student answers in Kannada, continue in natural Kannada; otherwise use English.`;
+  }
+
+  // Streams a reply from /api/ask, synthesizing and speaking complete sentences as they
+  // arrive (rather than waiting for the whole reply), and returns the full text once done.
+  // Shared by the general chat flow and Voice Viva mode — only the prompt/history differ.
+  async function streamAndSpeak(question, systemPrompt, historyForRequest) {
+    const response = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, systemPrompt, model: activeModel, history: historyForRequest }),
+    });
+    if (!response.ok || !response.body) throw new Error("Stream failed");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const sentenceEndRegex = /[.!?।]+(\s|$)/;
+    let buffer = "";
+    let fullText = "";
+    let isFirstChunk = true;
+    const chunkPromises = [];
+
+    // Peel off complete sentences as they stream in and start synthesizing them
+    // immediately — we don't wait for the whole reply to finish generating first.
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const piece = decoder.decode(value, { stream: true });
+      fullText += piece;
+      buffer += piece;
+
+      let match;
+      while ((match = sentenceEndRegex.exec(buffer))) {
+        const cut = match.index + match[0].length;
+        const sentence = buffer.slice(0, cut).trim();
+        buffer = buffer.slice(cut);
+        if (!sentence) continue;
+
+        if (isFirstChunk && sentence.length > 70) {
+          // The very first sentence is what the student waits on — if it's long, split off
+          // just a short opening burst so speech starts sooner instead of waiting for the
+          // whole sentence to both finish generating and finish synthesizing.
+          let splitAt = sentence.lastIndexOf(" ", 70);
+          if (splitAt <= 0) splitAt = 70;
+          const opening = sentence.slice(0, splitAt).trim();
+          const rest = sentence.slice(splitAt).trim();
+          chunkPromises.push(fetchSpeechChunk(opening, voiceLang));
+          if (rest) chunkPromises.push(fetchSpeechChunk(rest, voiceLang));
+        } else {
+          chunkPromises.push(fetchSpeechChunk(sentence, voiceLang));
+        }
+        isFirstChunk = false;
+      }
+    }
+    const trailing = buffer.trim();
+    if (trailing) chunkPromises.push(fetchSpeechChunk(trailing, voiceLang));
+
+    if (stoppedRef.current) return fullText.trim();
+
+    const answerText = fullText.trim() || "Sorry, I didn't catch that clearly — could you say it again?";
+    if (chunkPromises.length === 0) {
+      await speakText(answerText);
+    } else {
+      updatePhase("speaking");
+      await playBlobsInOrder(chunkPromises, stoppedRef, audioPlayerRef, audioContextRef, analyserRef);
+    }
+    return answerText;
+  }
+
+  // Kicks off Voice Viva mode — the AI opens with a greeting + its first question,
+  // instead of the general call's canned "what can I help with" greeting.
+  async function startViva() {
+    if (stoppedRef.current) return;
+    updatePhase("thinking");
+    ensureAnalyser();
+    try {
+      const answerText = await streamAndSpeak(
+        "Begin the viva now.",
+        buildVivaSystemPrompt(true),
+        []
+      );
+      if (stoppedRef.current || vivaEndedRef.current) return;
+      setConversationHistory((prev) => [...prev, { role: "assistant", text: answerText }]);
+      setQuestionCount(1);
+    } catch (e) {
+      console.error("Voice Viva opening failed:", e);
+      if (stoppedRef.current || vivaEndedRef.current) return;
+      const fallbackText = "Sorry, I couldn't get the viva started just now. Let's try again.";
+      setConversationHistory((prev) => [...prev, { role: "assistant", text: fallbackText }]);
+      await speakText(fallbackText);
+    }
+    if (!stoppedRef.current && !vivaEndedRef.current) startListening();
+  }
+
+  // Wraps up Voice Viva mode: speaks a short closing line, then fetches a brief written
+  // performance summary from the transcript and shows it on screen (not auto-closed —
+  // the student reads it and taps Done when ready).
+  async function endViva() {
+    if (stoppedRef.current || vivaEndedRef.current) return;
+    vivaEndedRef.current = true;
+    // Briefly borrow the same guard hardStop() uses so recognition's onend handler
+    // doesn't try to restart listening (or process leftover partial speech) once we've
+    // decided the session is over — then release it so speaking/fetching below can proceed.
+    stoppedRef.current = true;
+    try {
+      recognitionRef.current?.stop();
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    stoppedRef.current = false;
+
+    setShowSummary(true);
+    setVivaSummary(null);
+    try {
+      await speakText("That wraps up our viva. Let me put together some quick feedback for you.");
+    } catch {}
+    if (stoppedRef.current) return;
+    try {
+      const transcriptText = conversationHistory
+        .map((entry) => `${entry.role === "user" ? "Student" : "Examiner"}: ${entry.text}`)
+        .join("\n");
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: `Here is the transcript of the viva:\n\n${transcriptText}\n\nIn 2-3 sentences, summarize how the student performed overall and name one specific topic they should review.`,
+          systemPrompt: "You are an oral examiner writing a short private note to a student after their viva. Be honest, specific, and encouraging. Plain text only, no markdown.",
+          model: activeModel,
+        }),
+      });
+      const text = await res.text();
+      setVivaSummary(text.trim() || "Good effort today — keep practicing out loud, it really helps for the real exam.");
+    } catch (e) {
+      console.error("Viva summary failed:", e);
+      setVivaSummary("Good effort today — keep practicing out loud, it really helps for the real exam.");
+    }
+  }
+
   async function askAndRespond(question) {
     if (stoppedRef.current) return;
     recognitionRef.current?.stop();
     updatePhase("thinking");
     ensureAnalyser();
-    setConversationHistory((prev) => [...prev, { role: "user", text: question }]);
 
     const isGeneral = subject === "general";
-    const systemPrompt = isGeneral
+    const systemPrompt = mode === "viva"
+      ? buildVivaSystemPrompt(false)
+      : isGeneral
       ? `You are iBuddie, a warm and friendly AI study buddy having a live spoken conversation. Reply the way a supportive friend would speak out loud — natural and conversational, 2-4 sentences unless the student clearly asks for a full detailed explanation. If the student speaks in Kannada, reply in natural Kannada (mixing in English technical terms naturally); otherwise reply in English. Do not use markdown, headers, or any formatting symbols — this will be spoken aloud, not read.`
       : `You are iBuddie, a warm and friendly AI study buddy having a live spoken conversation with a ${exam} student about ${subjectLabel}. Reply the way a supportive senior would speak out loud — natural and conversational, 2-4 sentences unless the student clearly asks for a full detailed explanation. If the student speaks in Kannada, reply in natural Kannada (mixing in English technical terms naturally); otherwise reply in English. Do not use markdown, headers, or any formatting symbols — this will be spoken aloud, not read.`;
 
+    // Snapshot prior turns BEFORE appending this one — Viva mode needs the AI to remember
+    // what it already asked so it doesn't repeat itself or lose the thread.
+    const historyForRequest = mode === "viva"
+      ? conversationHistory.map((entry) => ({ role: entry.role, content: entry.text }))
+      : undefined;
+    setConversationHistory((prev) => [...prev, { role: "user", text: question }]);
+
     try {
-      const response = await fetch("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, systemPrompt, model: activeModel }),
-      });
-      if (!response.ok || !response.body) throw new Error("Stream failed");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      const sentenceEndRegex = /[.!?।]+(\s|$)/;
-      let buffer = "";
-      let fullText = "";
-      let isFirstChunk = true;
-      const chunkPromises = [];
-
-      // Peel off complete sentences as they stream in and start synthesizing them
-      // immediately — we don't wait for the whole reply to finish generating first.
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const piece = decoder.decode(value, { stream: true });
-        fullText += piece;
-        buffer += piece;
-
-        let match;
-        while ((match = sentenceEndRegex.exec(buffer))) {
-          const cut = match.index + match[0].length;
-          const sentence = buffer.slice(0, cut).trim();
-          buffer = buffer.slice(cut);
-          if (!sentence) continue;
-
-          if (isFirstChunk && sentence.length > 70) {
-            // The very first sentence is what the student waits on — if it's long, split off
-            // just a short opening burst so speech starts sooner instead of waiting for the
-            // whole sentence to both finish generating and finish synthesizing.
-            let splitAt = sentence.lastIndexOf(" ", 70);
-            if (splitAt <= 0) splitAt = 70;
-            const opening = sentence.slice(0, splitAt).trim();
-            const rest = sentence.slice(splitAt).trim();
-            chunkPromises.push(fetchSpeechChunk(opening, voiceLang));
-            if (rest) chunkPromises.push(fetchSpeechChunk(rest, voiceLang));
-          } else {
-            chunkPromises.push(fetchSpeechChunk(sentence, voiceLang));
-          }
-          isFirstChunk = false;
-        }
-      }
-      const trailing = buffer.trim();
-      if (trailing) chunkPromises.push(fetchSpeechChunk(trailing, voiceLang));
-
-      if (stoppedRef.current) return;
-
-      const answerText = fullText.trim() || "Sorry, I didn't catch that clearly — could you say it again?";
+      const answerText = await streamAndSpeak(question, systemPrompt, historyForRequest);
+      if (stoppedRef.current || vivaEndedRef.current) return;
       setConversationHistory((prev) => [...prev, { role: "assistant", text: answerText }]);
-
-      if (chunkPromises.length === 0) {
-        await speakText(answerText);
-      } else {
-        updatePhase("speaking");
-        await playBlobsInOrder(chunkPromises, stoppedRef, audioPlayerRef, audioContextRef, analyserRef);
-      }
+      if (mode === "viva") setQuestionCount((n) => n + 1);
     } catch (e) {
       console.error("Voice call ask/speak failed:", e);
-      if (stoppedRef.current) return;
+      if (stoppedRef.current || vivaEndedRef.current) return;
       const fallbackText = "Sorry, I couldn't reach the server just now. Could you try again?";
       setConversationHistory((prev) => [...prev, { role: "assistant", text: fallbackText }]);
       await speakText(fallbackText);
     }
-    if (!stoppedRef.current) startListening();
+    if (!stoppedRef.current && !vivaEndedRef.current) startListening();
   }
 
   if (!open) return null;
@@ -451,28 +578,56 @@ export default function VoiceCallModal({ open, onClose, voiceLang, subject, exam
       }}
     >
       <HologramTutor size={280} isSpeaking={phase === "speaking"} analyserRef={analyserRef} />
-      
-      <div style={{ marginTop: 28, color: PAPER, fontSize: 18, fontWeight: 700 }}>
-        {phase === "error" ? errorMsg : STATUS_LABEL[phase]}
-      </div>
 
-      {lastHeard && phase !== "error" && (
-        <div style={{ marginTop: 10, color: "#8C7D6B", fontSize: 14, maxWidth: 420, textAlign: "center" }}>
-          "{lastHeard}"
+      {mode === "viva" && !showSummary && (
+        <div style={{ marginTop: 18, color: "#B8860B", fontSize: 12.5, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase" }}>
+          Question {questionCount || 1}
         </div>
       )}
 
-      <button
-        onClick={handleEndCall}
-        style={{
-          marginTop: 48, display: "flex", alignItems: "center", gap: 8,
-          background: "#B23B3B", color: "#fff", border: "none",
-          padding: "12px 28px", borderRadius: 999, fontSize: 15, fontWeight: 700, cursor: "pointer",
-        }}
-      >
-        <PhoneOff size={18} />
-        End Call
-      </button>
+      {showSummary ? (
+        <div style={{ marginTop: 20, maxWidth: 420, width: "100%", padding: "0 24px", textAlign: "center" }}>
+          <div style={{ color: PAPER, fontSize: 20, fontWeight: 700, marginBottom: 10 }}>🎉 Viva complete</div>
+          <div style={{ color: "#8C7D6B", fontSize: 13, marginBottom: 18 }}>{questionCount} question{questionCount === 1 ? "" : "s"} covered</div>
+          <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 18, color: PAPER, fontSize: 14, lineHeight: 1.6, marginBottom: 24, minHeight: 60 }}>
+            {vivaSummary === null ? "Preparing your feedback…" : vivaSummary}
+          </div>
+          <button
+            onClick={handleEndCall}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 8,
+              background: "#B23B3B", color: "#fff", border: "none",
+              padding: "12px 28px", borderRadius: 999, fontSize: 15, fontWeight: 700, cursor: "pointer",
+            }}
+          >
+            Done
+          </button>
+        </div>
+      ) : (
+        <>
+          <div style={{ marginTop: 12, color: PAPER, fontSize: 18, fontWeight: 700 }}>
+            {phase === "error" ? errorMsg : phase === "greeting" && mode === "viva" ? "Starting your viva…" : STATUS_LABEL[phase]}
+          </div>
+
+          {lastHeard && phase !== "error" && (
+            <div style={{ marginTop: 10, color: "#8C7D6B", fontSize: 14, maxWidth: 420, textAlign: "center" }}>
+              "{lastHeard}"
+            </div>
+          )}
+
+          <button
+            onClick={mode === "viva" ? endViva : handleEndCall}
+            style={{
+              marginTop: 48, display: "flex", alignItems: "center", gap: 8,
+              background: "#B23B3B", color: "#fff", border: "none",
+              padding: "12px 28px", borderRadius: 999, fontSize: 15, fontWeight: 700, cursor: "pointer",
+            }}
+          >
+            <PhoneOff size={18} />
+            {mode === "viva" ? "End Viva" : "End Call"}
+          </button>
+        </>
+      )}
 
       <AvatarKeyframes />
 
