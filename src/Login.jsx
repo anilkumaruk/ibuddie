@@ -2,8 +2,8 @@ import { useState } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup,
-  RecaptchaVerifier, signInWithPhoneNumber,
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithCustomToken,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
 } from "firebase/auth";
 
 // These values come from your Firebase project settings — see setup steps provided separately.
@@ -22,10 +22,13 @@ export const db = getFirestore(app);
 const ACCENT = "#6D5AE6";
 
 export default function Login({ onLogin }) {
-  const [mode, setMode] = useState("choice"); // choice | phone | otp
+  const [mode, setMode] = useState("choice"); // choice | phone | otp | email
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
-  const [confirmationResult, setConfirmationResult] = useState(null);
+  const [otpSession, setOtpSession] = useState(null); // { sessionId, phone } from /api/send-otp
+  const [emailMode, setEmailMode] = useState("signin"); // "signin" | "signup", only used when mode === "email"
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -44,45 +47,73 @@ export default function Login({ onLogin }) {
     }
   }
 
-  function setupRecaptcha() {
-    if (!window.recaptchaVerifier) {
-      window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
-        size: "invisible",
-      });
-    }
-  }
-
-  // Firebase requires full E.164 format (e.g. +918861142813). Most users just
-  // type their bare 10-digit number, so normalize it instead of rejecting it —
-  // that's what was causing auth/invalid-phone-number.
-  function toE164(raw) {
-    const trimmed = raw.trim();
-    if (trimmed.startsWith("+")) return `+${trimmed.slice(1).replace(/\D/g, "")}`;
-    const digits = trimmed.replace(/\D/g, "");
-    if (digits.length === 10) return `+91${digits}`; // bare Indian mobile number
-    if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
-    return `+${digits}`;
-  }
-
+  // Firebase's own phone auth needs a Blaze billing account to send SMS, which
+  // isn't set up. Instead, the OTP is sent through 2Factor.in (via our own
+  // backend) and, once verified, our backend mints a Firebase custom token —
+  // creating/minting tokens via the Admin SDK is free on any plan.
   async function handleSendOtp() {
     setError("");
     const digitsOnly = phone.trim().replace(/\D/g, "");
-    if (digitsOnly.length < 10) {
+    if (digitsOnly.length !== 10) {
       setError("Enter your 10-digit mobile number.");
       return;
     }
-    const e164Phone = toE164(phone);
     setBusy(true);
     try {
-      setupRecaptcha();
-      const result = await signInWithPhoneNumber(auth, e164Phone, window.recaptchaVerifier);
-      setConfirmationResult(result);
+      const res = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: digitsOnly }),
+      });
+      const rawBody = await res.text();
+      let data;
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        throw new Error("The server had trouble sending the OTP. Please try again.");
+      }
+      if (!res.ok || !data.sessionId) throw new Error(data.error || `Server error (${res.status})`);
+
+      setOtpSession({ sessionId: data.sessionId, phone: data.phone });
       setMode("otp");
     } catch (e) {
-      console.error("OTP send error:", e.code, e.message);
-      // Show the full server message too (not just the error code) — Firebase's
-      // detailed reason (e.g. which exact check failed) lives in e.message.
-      setError(`Couldn't send OTP: ${e.code || "error"} — ${e.message || "no further detail"}`);
+      console.error("OTP send error:", e.message);
+      setError(`Couldn't send OTP: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const EMAIL_ERROR_MESSAGES = {
+    "auth/invalid-email": "That doesn't look like a valid email address.",
+    "auth/email-already-in-use": "An account with that email already exists — try signing in instead.",
+    "auth/weak-password": "Password must be at least 6 characters.",
+    "auth/user-not-found": "No account found with that email — try creating one instead.",
+    "auth/wrong-password": "Incorrect password. Please try again.",
+    "auth/invalid-credential": "Incorrect email or password. Please try again.",
+    "auth/missing-password": "Enter your password.",
+  };
+
+  async function handleEmailAuth() {
+    setError("");
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !trimmedEmail.includes("@")) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = emailMode === "signup"
+        ? await createUserWithEmailAndPassword(auth, trimmedEmail, password)
+        : await signInWithEmailAndPassword(auth, trimmedEmail, password);
+      onLogin({ name: result.user.email, uid: result.user.uid, method: "email" });
+    } catch (e) {
+      console.error("Email auth error:", e.code, e.message);
+      setError(EMAIL_ERROR_MESSAGES[e.code] || `Couldn't ${emailMode === "signup" ? "create account" : "sign in"}: ${e.code || e.message}`);
     } finally {
       setBusy(false);
     }
@@ -90,13 +121,28 @@ export default function Login({ onLogin }) {
 
   async function handleVerifyOtp() {
     setError("");
-    if (!otp.trim()) return;
+    if (!otp.trim() || !otpSession) return;
     setBusy(true);
     try {
-      const result = await confirmationResult.confirm(otp.trim());
+      const res = await fetch("/api/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: otpSession.sessionId, otp: otp.trim(), phone: otpSession.phone }),
+      });
+      const rawBody = await res.text();
+      let data;
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        throw new Error("The server had trouble verifying that code. Please try again.");
+      }
+      if (!res.ok || !data.customToken) throw new Error(data.error || `Server error (${res.status})`);
+
+      const result = await signInWithCustomToken(auth, data.customToken);
       onLogin({ name: result.user.phoneNumber, uid: result.user.uid, method: "phone" });
     } catch (e) {
-      setError("Incorrect code. Please try again.");
+      console.error("OTP verify error:", e.message);
+      setError(e.message || "Incorrect code. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -105,7 +151,6 @@ export default function Login({ onLogin }) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F4F5FA", fontFamily: "'Inter', system-ui, sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');`}</style>
-      <div id="recaptcha-container" />
       <div style={{ width: 380, background: "#FFFFFF", borderRadius: 20, padding: 32, boxShadow: "0 8px 30px rgba(30,20,80,0.08)" }}>
         <div style={{ textAlign: "center", marginBottom: 26 }}>
           <span style={{ fontSize: 26, fontWeight: 800, color: "#211C42" }}>i<span style={{ color: ACCENT }}>Buddie</span></span>
@@ -130,11 +175,57 @@ export default function Login({ onLogin }) {
               onClick={() => setMode("phone")}
               style={{
                 width: "100%", padding: "12px 0", borderRadius: 12, border: "none",
-                background: ACCENT, color: "#FFFFFF", fontWeight: 600, fontSize: 14, cursor: "pointer",
+                background: ACCENT, color: "#FFFFFF", fontWeight: 600, fontSize: 14, cursor: "pointer", marginBottom: 12,
               }}
             >
               Continue with Mobile Number
             </button>
+            <button
+              onClick={() => setMode("email")}
+              style={{
+                width: "100%", padding: "12px 0", borderRadius: 12, border: "1px solid #EDEBF7",
+                background: "#FFFFFF", color: "#211C42", fontWeight: 600, fontSize: 14, cursor: "pointer",
+              }}
+            >
+              Continue with Email
+            </button>
+          </>
+        )}
+
+        {mode === "email" && (
+          <>
+            <label style={{ fontSize: 12.5, fontWeight: 600, color: "#5C5680", marginBottom: 6, display: "block" }}>Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #EDEBF7", fontSize: 14, marginBottom: 12, outline: "none", boxSizing: "border-box" }}
+            />
+            <label style={{ fontSize: 12.5, fontWeight: 600, color: "#5C5680", marginBottom: 6, display: "block" }}>Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={emailMode === "signup" ? "At least 6 characters" : "••••••••"}
+              autoComplete={emailMode === "signup" ? "new-password" : "current-password"}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #EDEBF7", fontSize: 14, marginBottom: 14, outline: "none", boxSizing: "border-box" }}
+            />
+            <button
+              onClick={handleEmailAuth}
+              disabled={busy}
+              style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 600, fontSize: 14, cursor: busy ? "default" : "pointer", marginBottom: 10 }}
+            >
+              {busy ? (emailMode === "signup" ? "Creating account…" : "Signing in…") : (emailMode === "signup" ? "Create Account" : "Sign In")}
+            </button>
+            <div
+              onClick={() => { setEmailMode(emailMode === "signup" ? "signin" : "signup"); setError(""); }}
+              style={{ textAlign: "center", fontSize: 12.5, color: "#8B85AE", cursor: "pointer", marginBottom: 10 }}
+            >
+              {emailMode === "signup" ? "Already have an account? Sign in" : "New here? Create an account"}
+            </div>
+            <div onClick={() => { setMode("choice"); setEmail(""); setPassword(""); setError(""); }} style={{ textAlign: "center", fontSize: 12.5, color: "#8B85AE", cursor: "pointer" }}>← Back</div>
           </>
         )}
 
@@ -169,7 +260,7 @@ export default function Login({ onLogin }) {
 
         {mode === "otp" && (
           <>
-            <label style={{ fontSize: 12.5, fontWeight: 600, color: "#5C5680", marginBottom: 6, display: "block" }}>Enter the 6-digit code sent to {toE164(phone)}</label>
+            <label style={{ fontSize: 12.5, fontWeight: 600, color: "#5C5680", marginBottom: 6, display: "block" }}>Enter the 6-digit code sent to +91 {phone}</label>
             <input
               type="text"
               value={otp}
@@ -184,7 +275,7 @@ export default function Login({ onLogin }) {
             >
               {busy ? "Verifying…" : "Verify & Continue"}
             </button>
-            <div onClick={() => setMode("phone")} style={{ textAlign: "center", fontSize: 12.5, color: "#8B85AE", cursor: "pointer" }}>← Back</div>
+            <div onClick={() => { setMode("phone"); setOtp(""); setOtpSession(null); setError(""); }} style={{ textAlign: "center", fontSize: 12.5, color: "#8B85AE", cursor: "pointer" }}>← Back</div>
           </>
         )}
 
