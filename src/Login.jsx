@@ -242,7 +242,7 @@ export default function Login({ onLogin }) {
                   if (digits.length > 10 && digits.startsWith("91")) digits = digits.slice(2); // handle pasted +91/91 prefix
                   setPhone(digits.slice(0, 10));
                 }}
-                placeholder="8861142813"
+                placeholder="1234567890"
                 maxLength={10}
                 style={{ flex: 1, padding: "12px 14px", border: "none", fontSize: 14, outline: "none", boxSizing: "border-box" }}
               />
