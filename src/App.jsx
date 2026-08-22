@@ -131,7 +131,6 @@ const NAV_ITEMS = [
   { key: "formulas", label: "Formula Bank", icon: Sigma },
   { key: "rankpredictor", label: "Rank Predictor", icon: TrendingUp },
   { key: "revision", label: "Revision Reminders", icon: Brain },
-  { key: "settings", label: "Settings", icon: Settings },
 ];
 
 function parseReply(raw) {
@@ -172,6 +171,13 @@ export default function App({ user, onLogout }) {
       return localStorage.getItem("ibuddie_wake_word") === "true";
     } catch {
       return false;
+    }
+  });
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem("ibuddie_theme") || "light";
+    } catch {
+      return "light";
     }
   });
   const wakeRecognitionRef = useRef(null);
@@ -258,6 +264,12 @@ export default function App({ user, onLogout }) {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ibuddie_theme", theme);
+    } catch {}
+  }, [theme]);
 
   // On (re)opening the app, file any leftover session from last time into Chat History,
   // then always start on a fresh chat instead of resuming where we left off.
@@ -1529,13 +1541,29 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
   }
 
   return (
-    <div style={{ height: "100vh", width: "100%", display: "flex", background: "#F2EFE7", backgroundImage: "linear-gradient(#DAD4C5 1px, transparent 1px), linear-gradient(90deg, #DAD4C5 1px, transparent 1px)", backgroundSize: "32px 32px", fontFamily: "'Inter', system-ui, sans-serif", overflow: "hidden" }}>
+    <div data-ibuddie-theme={theme} style={{ height: "100vh", width: "100%", display: "flex", background: "var(--ibuddie-sidebar-bg)", backgroundImage: "linear-gradient(var(--ibuddie-sidebar-border) 1px, transparent 1px), linear-gradient(90deg, var(--ibuddie-sidebar-border) 1px, transparent 1px)", backgroundSize: "32px 32px", fontFamily: "'Inter', system-ui, sans-serif", overflow: "hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
         ::placeholder { color: #8C7D6B; }
         textarea:focus { outline: none; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        [data-ibuddie-theme] {
+          --ibuddie-sidebar-bg: #F2EFE7;
+          --ibuddie-sidebar-border: #DAD4C5;
+          --ibuddie-sidebar-text: #17140F;
+          --ibuddie-sidebar-muted: #8C7D6B;
+          --ibuddie-sidebar-gold-text: #8F6A08;
+          --ibuddie-sidebar-chip-bg: rgba(23,20,15,0.06);
+        }
+        [data-ibuddie-theme="dark"] {
+          --ibuddie-sidebar-bg: #201C15;
+          --ibuddie-sidebar-border: #3A342A;
+          --ibuddie-sidebar-text: #F2EFE7;
+          --ibuddie-sidebar-muted: #B0A28C;
+          --ibuddie-sidebar-gold-text: #E0B24D;
+          --ibuddie-sidebar-chip-bg: rgba(255,255,255,0.08);
+        }
         @media (max-width: 768px) {
           .ibuddie-main { padding: 12px !important; }
           .ibuddie-subjects { flex-wrap: nowrap !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
@@ -1561,7 +1589,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
       {/* Sidebar */}
       <div
         style={{
-          width: sidebarOpen ? 236 : 72, background: "#F2EFE7", display: "flex", flexDirection: "column",
+          width: sidebarOpen ? 236 : 72, background: "var(--ibuddie-sidebar-bg)", display: "flex", flexDirection: "column",
           padding: sidebarOpen ? "22px 16px" : "22px 10px", flexShrink: 0, transition: "width 0.18s ease",
           position: isMobile ? "fixed" : "relative", top: 0, left: 0, height: isMobile ? "100vh" : "auto",
           zIndex: isMobile ? 35 : 1, transform: isMobile && !sidebarOpen ? "translateX(-100%)" : "translateX(0)",
@@ -1582,7 +1610,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 6px", marginBottom: 26, justifyContent: sidebarOpen ? "flex-start" : "center", flexWrap: "wrap" }}>
           {sidebarOpen ? (
             <>
-              <span style={{ fontSize: 22, fontWeight: 800, color: "#17140F" }}>i<span style={{ color: "#B8860B" }}>Buddie</span></span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: "var(--ibuddie-sidebar-text)" }}>i<span style={{ color: "#B8860B" }}>Buddie</span></span>
               {MODEL_ORDER.filter((k) => subscriptions[k]?.active).map((k) => (
                 <div
                   key={k}
@@ -1590,12 +1618,12 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   style={{ display: "inline-flex", alignItems: "center", gap: 3, background: "#B8860B14", border: "1px solid #B8860B33", borderRadius: 999, padding: "2px 8px", cursor: "pointer" }}
                 >
                   <Crown size={10} color="#B8860B" />
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8F6A08" }}>{MODELS[k].label}</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ibuddie-sidebar-gold-text)" }}>{MODELS[k].label}</span>
                 </div>
               ))}
             </>
           ) : (
-            <span style={{ fontSize: 20, fontWeight: 800, color: "#17140F" }}>i</span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: "var(--ibuddie-sidebar-text)" }}>i</span>
           )}
         </div>
 
@@ -1605,13 +1633,10 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               key={item.key}
               title={item.label}
               onClick={() => {
-                if (item.key === "settings") setSettingsOpen(true);
-                else {
-                  if (item.key === "doubt") startNewChat();
-                  if (item.key === "pyq") { setPyqStep("browse"); setPyqSetNumber(""); setPyqBrowseMode("questions"); }
-                  setView(item.key);
-                  if (isMobile) setSidebarOpen(false);
-                }
+                if (item.key === "doubt") startNewChat();
+                if (item.key === "pyq") { setPyqStep("browse"); setPyqSetNumber(""); setPyqBrowseMode("questions"); }
+                setView(item.key);
+                if (isMobile) setSidebarOpen(false);
               }}
               style={{
                 display: "flex", alignItems: "center", gap: 11,
@@ -1619,7 +1644,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 justifyContent: sidebarOpen ? "flex-start" : "center",
                 borderRadius: 10,
                 background: view === item.key ? ACCENT : "transparent",
-                color: view === item.key ? "#FFFFFF" : "#8C7D6B",
+                color: view === item.key ? "#FFFFFF" : "var(--ibuddie-sidebar-muted)",
                 fontSize: 13.5, fontWeight: 500, cursor: "pointer",
               }}
             >
@@ -1628,7 +1653,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <>
                   <span style={{ flex: 1 }}>{item.label}</span>
                   {item.key === "doubt" && (
-                    <Plus size={15} color={view === item.key ? "#FFFFFF" : "#8C7D6B"} style={{ flexShrink: 0 }} />
+                    <Plus size={15} color={view === item.key ? "#FFFFFF" : "var(--ibuddie-sidebar-muted)"} style={{ flexShrink: 0 }} />
                   )}
                 </>
               )}
@@ -1638,21 +1663,21 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
         {/* Chat History */}
         {sidebarOpen && (
-          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid #DAD4C5", minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div style={{ fontWeight: 700, fontSize: 12.5, color: "#8C7D6B", marginBottom: 12, letterSpacing: "0.03em", textTransform: "uppercase" }}>Chat History</div>
+          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--ibuddie-sidebar-border)", minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{ fontWeight: 700, fontSize: 12.5, color: "var(--ibuddie-sidebar-muted)", marginBottom: 12, letterSpacing: "0.03em", textTransform: "uppercase" }}>Chat History</div>
             {conversations.length > 0 && (
               <div style={{ position: "relative", marginBottom: 10 }}>
-                <Search size={13} color="#8C7D6B" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
+                <Search size={13} color="var(--ibuddie-sidebar-muted)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
                 <input
                   type="text"
                   value={historySearchQuery}
                   onChange={(e) => setHistorySearchQuery(e.target.value)}
                   placeholder="Search your past doubts…"
-                  style={{ width: "100%", padding: "7px 10px 7px 28px", borderRadius: 8, border: "1px solid #DAD4C5", fontSize: 11.5, color: "#2B2018", boxSizing: "border-box" }}
+                  style={{ width: "100%", padding: "7px 10px 7px 28px", borderRadius: 8, border: "1px solid var(--ibuddie-sidebar-border)", fontSize: 11.5, color: "var(--ibuddie-sidebar-text)", boxSizing: "border-box", background: "var(--ibuddie-sidebar-bg)" }}
                 />
               </div>
             )}
-            {conversations.length === 0 && <div style={{ fontSize: 11.5, color: "#8C7D6B" }}>Past chats will show up here once you start a new one.</div>}
+            {conversations.length === 0 && <div style={{ fontSize: 11.5, color: "var(--ibuddie-sidebar-muted)" }}>Past chats will show up here once you start a new one.</div>}
             {(() => {
               const q = historySearchQuery.trim().toLowerCase();
               const results = q === "" ? conversations.map((conv) => ({ conv, snippet: null })) : conversations
@@ -1673,7 +1698,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 .filter(Boolean);
 
               if (q !== "" && results.length === 0) {
-                return <div style={{ fontSize: 11.5, color: "#8C7D6B", padding: "6px 4px" }}>No past doubts match "{historySearchQuery}"</div>;
+                return <div style={{ fontSize: 11.5, color: "var(--ibuddie-sidebar-muted)", padding: "6px 4px" }}>No past doubts match "{historySearchQuery}"</div>;
               }
 
               return (
@@ -1686,15 +1711,15 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                         onClick={() => { openConversation(conv); setView("doubt"); setHistorySearchQuery(""); if (isMobile) setSidebarOpen(false); }}
                         style={{ display: "flex", gap: 9, padding: "6px 4px", borderRadius: 8, cursor: "pointer" }}
                       >
-                        <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(23,20,15,0.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          {s ? <s.icon size={12} color="#17140F" /> : <MessageSquare size={12} color="#17140F" />}
+                        <div style={{ width: 26, height: 26, borderRadius: 7, background: "var(--ibuddie-sidebar-chip-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          {s ? <s.icon size={12} color="var(--ibuddie-sidebar-text)" /> : <MessageSquare size={12} color="var(--ibuddie-sidebar-text)" />}
                         </div>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 11.5, fontWeight: 500, color: "#17140F", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.title}</div>
+                          <div style={{ fontSize: 11.5, fontWeight: 500, color: "var(--ibuddie-sidebar-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.title}</div>
                           {snippet ? (
-                            <div style={{ fontSize: 10, color: "#8F6A08", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{snippet}</div>
+                            <div style={{ fontSize: 10, color: "var(--ibuddie-sidebar-gold-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{snippet}</div>
                           ) : (
-                            <div style={{ fontSize: 10, color: "#8C7D6B" }}>{s?.label || "General"} · {timeAgo(conv.ts)}</div>
+                            <div style={{ fontSize: 10, color: "var(--ibuddie-sidebar-muted)" }}>{s?.label || "General"} · {timeAgo(conv.ts)}</div>
                           )}
                         </div>
                       </div>
@@ -3462,6 +3487,28 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                   );
                 })}
 
+                <div style={{ padding: "10px 0", borderTop: "1px solid #E4E2DA" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: "#2B2018" }}>Dark sidebar theme</div>
+                    <div
+                      onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
+                      style={{
+                        width: 40, height: 22, borderRadius: 999, cursor: "pointer",
+                        background: theme === "dark" ? GREEN : "#E4E2DA",
+                        position: "relative", transition: "background 0.15s ease",
+                      }}
+                    >
+                      <div style={{
+                        position: "absolute", top: 2, left: theme === "dark" ? 20 : 2,
+                        width: 18, height: 18, borderRadius: "50%", background: "#FFFFFF",
+                        transition: "left 0.15s ease",
+                      }} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "#8C7D6B", marginTop: 4 }}>
+                    Switches the left navigation to a dark look. More of the app will follow in a future update.
+                  </div>
+                </div>
                 <div style={{ padding: "10px 0", borderTop: "1px solid #E4E2DA" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: "#2B2018" }}>"Hey Darling" wake word</div>
