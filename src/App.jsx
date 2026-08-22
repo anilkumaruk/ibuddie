@@ -83,6 +83,9 @@ const BADGE_DEFS = [
   { id: "first_test", label: "First Mock Test", emoji: "📝", check: (s) => s.totalTests >= 1 },
   { id: "tests_10", label: "10 Mock Tests", emoji: "📝", check: (s) => s.totalTests >= 10 },
   { id: "perfect_score", label: "Perfect Score", emoji: "⭐", check: (s) => s.hasPerfectScore },
+  { id: "first_study_session", label: "First Focus Session", emoji: "📚", check: (s) => s.totalStudyMinutes >= 1 },
+  { id: "focus_5hr", label: "5 Hours Focused", emoji: "📚", check: (s) => s.totalStudyMinutes >= 300 },
+  { id: "focus_20hr", label: "20 Hours Focused", emoji: "🏆", check: (s) => s.totalStudyMinutes >= 1200 },
 ];
 const ACCENT = "#17140F"; // landing page's "ink"
 const GREEN = "#2F6B4A"; // landing page's checkmark green
@@ -120,6 +123,7 @@ const PUC_SYLLABUS = {
 
 const NAV_ITEMS = [
   { key: "doubt", label: "Doubt Desk", icon: ClipboardCheck },
+  { key: "studywithme", label: "Study With Me", icon: Timer },
   { key: "mocktest", label: "Daily Mock Test", icon: Calendar },
   { key: "topics", label: "Important Topics", icon: BookMarked },
   { key: "pyq", label: "PYQ Bank", icon: FileQuestion },
@@ -228,6 +232,13 @@ export default function App({ user, onLogout }) {
   const [pyqList, setPyqList] = useState([]);
   const [expandedPyqIndex, setExpandedPyqIndex] = useState(null); // which question card is expanded to show its solution
   const [pucYear, setPucYear] = useState("2nd"); // "1st" | "2nd"
+  const [studySession, setStudySession] = useState({
+    status: "setup", // "setup" | "active" | "complete"
+    durationMinutes: 30,
+    subjectId: "physics",
+    topic: "",
+    secondsLeft: 0,
+  });
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -556,6 +567,23 @@ export default function App({ user, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mockTest.status, mockTest.timeLeft]);
 
+  // Ticks the Study With Me countdown once a second while active, and awards XP
+  // for focused time once it reaches zero. Deliberately not tied to `view` — it
+  // keeps running in the background if the student switches to Doubt Desk to
+  // ask the mentor something, so the timer really does "stay with them".
+  useEffect(() => {
+    if (studySession.status !== "active") return;
+    if (studySession.secondsLeft <= 0) {
+      finishStudySession();
+      return;
+    }
+    const t = setTimeout(() => {
+      setStudySession((prev) => (prev.status === "active" ? { ...prev, secondsLeft: prev.secondsLeft - 1 } : prev));
+    }, 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studySession.status, studySession.secondsLeft]);
+
   // Paywall check only — does NOT consume usage. Call this before the fetch;
   // call consumeUsage() separately, only after a request actually succeeds,
   // so a failed generation doesn't cost the student a free doubt.
@@ -654,6 +682,26 @@ export default function App({ user, onLogout }) {
 
   function resetMockTest() {
     setMockTest({ status: "setup", count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0 });
+  }
+
+  function startStudySession() {
+    setStudySession((prev) => ({ ...prev, status: "active", secondsLeft: prev.durationMinutes * 60 }));
+  }
+
+  function finishStudySession() {
+    setStudySession((prev) => ({ ...prev, status: "complete" }));
+    if (user?.uid) recordActivity("study", { minutes: studySession.durationMinutes });
+  }
+
+  function resetStudySession() {
+    setStudySession({ status: "setup", durationMinutes: 30, subjectId: "physics", topic: "", secondsLeft: 0 });
+  }
+
+  function formatStudyTimer(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   }
 
   async function startRecallCheck(subj, topic) {
@@ -942,6 +990,7 @@ export default function App({ user, onLogout }) {
     let xpGain = 0;
     if (type === "doubt") xpGain = 10;
     if (type === "test") xpGain = 25 + Math.round((meta.score / meta.total) * 25);
+    if (type === "study") xpGain = Math.round((meta.minutes || 0) * (5 / 3)); // 30 focused minutes ≈ +50 XP
     if (streakExtendedToday) xpGain += 15;
     const newXp = xp + xpGain;
 
@@ -952,6 +1001,7 @@ export default function App({ user, onLogout }) {
       update.totalTestsCompleted = increment(1);
       if (meta.score === meta.total && meta.total > 0) update.hasPerfectScore = true;
     }
+    if (type === "study") update.totalStudyMinutes = increment(meta.minutes || 0);
 
     // Badge checking needs the up-to-date lifetime totals, which increment() applies
     // server-side — so re-read after the update rather than trusting stale local counts.
@@ -964,6 +1014,7 @@ export default function App({ user, onLogout }) {
         totalDoubts: freshData.totalDoubtsAsked || 0,
         totalTests: freshData.totalTestsCompleted || 0,
         hasPerfectScore: !!freshData.hasPerfectScore,
+        totalStudyMinutes: freshData.totalStudyMinutes || 0,
       };
       const currentBadges = freshData.badges || [];
       const earnedNow = BADGE_DEFS.filter((b) => !currentBadges.includes(b.id) && b.check(statsForBadges));
@@ -1668,7 +1719,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -2026,6 +2077,161 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               </div>
             </div>
           </div>
+          )}
+
+          {/* Study With Me card */}
+          {view === "studywithme" && (
+            <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+              {studySession.status === "setup" ? (() => {
+                const daysSinceGenerated = studyPlanGeneratedAt ? Math.floor((Date.now() - studyPlanGeneratedAt) / 86400000) + 1 : 1;
+                const todaysPlanDay = studyPlan.find((d) => d.day === daysSinceGenerated) || studyPlan[0];
+                const suggestedTopic = todaysPlanDay?.tasks?.find((t, ti) => !studyPlanCompletedTasks[`${todaysPlanDay.day}-${ti}`]) || todaysPlanDay?.tasks?.[0] || "";
+
+                return (
+                  <div style={{ margin: "auto", textAlign: "center", maxWidth: 380, width: "100%" }}>
+                    <Timer size={28} color="#B8860B" style={{ marginBottom: 14 }} />
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>Study With Me</div>
+                    <div style={{ fontSize: 13, color: "#8C7D6B", marginBottom: 22 }}>Pick a focus session length — iBuddie stays with you the whole time.</div>
+
+                    {todaysPlanDay && suggestedTopic && (
+                      <button
+                        onClick={() => {
+                          const subj = SUBJECTS.find((s) => s.label === todaysPlanDay.subject);
+                          setStudySession((prev) => ({ ...prev, subjectId: subj ? subj.id : prev.subjectId, topic: suggestedTopic }));
+                        }}
+                        style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", padding: "12px 14px", borderRadius: 14, background: "#B8860B0D", border: `1px solid ${ACCENT}33`, marginBottom: 20, cursor: "pointer" }}
+                      >
+                        <Target size={20} color="#B8860B" style={{ flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 11, color: "#8C7D6B", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 }}>Today's mission</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{todaysPlanDay.subject} — {suggestedTopic}</div>
+                        </div>
+                        <span style={{ fontSize: 11.5, color: ACCENT, fontWeight: 700, flexShrink: 0 }}>Use this</span>
+                      </button>
+                    )}
+
+                    <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                      {SUBJECTS.filter((s) => s.id !== "general").map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => setStudySession((prev) => ({ ...prev, subjectId: s.id }))}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10,
+                            border: studySession.subjectId === s.id ? `1.5px solid ${ACCENT}` : "1px solid #E4E2DA",
+                            background: studySession.subjectId === s.id ? "#17140F0D" : "#FFFFFF",
+                            color: "#2B2018", fontWeight: 600, fontSize: 12.5, cursor: "pointer",
+                          }}
+                        >
+                          <s.icon size={14} /> {s.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <input
+                      type="text"
+                      value={studySession.topic}
+                      onChange={(e) => setStudySession((prev) => ({ ...prev, topic: e.target.value }))}
+                      placeholder="What are you studying? (e.g. Current Electricity)"
+                      style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #E4E2DA", fontSize: 13.5, color: "#2B2018", marginBottom: 20, boxSizing: "border-box" }}
+                    />
+
+                    <div style={{ fontSize: 11.5, color: "#8C7D6B", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 8 }}>Duration</div>
+                    <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+                      {[15, 30, 45, 60].map((mins) => (
+                        <button
+                          key={mins}
+                          onClick={() => setStudySession((prev) => ({ ...prev, durationMinutes: mins }))}
+                          style={{
+                            padding: "10px 18px", borderRadius: 10,
+                            border: studySession.durationMinutes === mins ? "none" : "1px solid #E4E2DA",
+                            background: studySession.durationMinutes === mins ? ACCENT : "#FFFFFF",
+                            color: studySession.durationMinutes === mins ? "#fff" : "#2B2018",
+                            fontWeight: 700, fontSize: 13.5, cursor: "pointer",
+                          }}
+                        >
+                          {mins} min
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={startStudySession}
+                      style={{ width: "100%", padding: "13px 0", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                    >
+                      <Timer size={16} /> Let's study together
+                    </button>
+                  </div>
+                );
+              })() : studySession.status === "active" ? (() => {
+                const totalSeconds = studySession.durationMinutes * 60;
+                const elapsedPercent = totalSeconds > 0 ? Math.round(((totalSeconds - studySession.secondsLeft) / totalSeconds) * 100) : 0;
+                const subjectMeta = SUBJECTS.find((s) => s.id === studySession.subjectId) || SUBJECTS[1];
+                const filledBars = Math.round(elapsedPercent / 10);
+
+                return (
+                  <div style={{ margin: "auto", textAlign: "center", maxWidth: 380, width: "100%" }}>
+                    <div style={{ fontSize: 13.5, color: "#8C7D6B", marginBottom: 4 }}>📚 Let's study together.</div>
+                    <div style={{ fontSize: 40, fontWeight: 800, color: "#2B2018", letterSpacing: 1, fontVariantNumeric: "tabular-nums", marginBottom: 22 }}>
+                      {formatStudyTimer(studySession.secondsLeft)}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 14, background: "#B8860B0D", border: `1px solid ${ACCENT}33`, marginBottom: 20, textAlign: "left" }}>
+                      <subjectMeta.icon size={22} color="#B8860B" style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: "#8C7D6B", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 }}>Today's mission</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#2B2018" }}>{subjectMeta.label}{studySession.topic ? ` — ${studySession.topic}` : ""}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>
+                      {Array.from({ length: 10 }).map((_, i) => (
+                        <div key={i} style={{ flex: 1, height: 8, borderRadius: 4, background: i < filledBars ? GREEN : "#E4E2DA" }} />
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#8C7D6B", marginBottom: 26 }}>{elapsedPercent}% through this session</div>
+
+                    <button
+                      onClick={() => {
+                        setInput(studySession.topic ? `I need help with ${studySession.topic}` : "I need help with what I'm studying right now.");
+                        if (subjectMeta.id !== "general") setSubject(subjectMeta.id);
+                        setView("doubt");
+                      }}
+                      style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: `1px solid ${ACCENT}`, background: "#FFFFFF", color: ACCENT, fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginBottom: 10 }}
+                    >
+                      Need help? Ask Mentor
+                    </button>
+                    <button
+                      onClick={resetStudySession}
+                      style={{ width: "100%", padding: "10px 0", borderRadius: 12, border: "none", background: "transparent", color: "#8C7D6B", fontWeight: 600, fontSize: 12.5, cursor: "pointer", textDecoration: "underline" }}
+                    >
+                      End session early
+                    </button>
+                  </div>
+                );
+              })() : (
+                <div style={{ margin: "auto", textAlign: "center", maxWidth: 340 }}>
+                  <div style={{ fontSize: 34, marginBottom: 10 }}>🎉</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2018", marginBottom: 18 }}>Session complete</div>
+                  <div style={{ display: "flex", justifyContent: "center", gap: 24, marginBottom: 26 }}>
+                    <div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: GREEN }}>+{Math.round(studySession.durationMinutes * (5 / 3))} XP</div>
+                      <div style={{ fontSize: 11, color: "#8C7D6B" }}>earned</div>
+                    </div>
+                    <div style={{ width: 1, background: "#E4E2DA" }} />
+                    <div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: "#2B2018" }}>{studySession.durationMinutes} min</div>
+                      <div style={{ fontSize: 11, color: "#8C7D6B" }}>focused</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={resetStudySession}
+                    style={{ width: "100%", padding: "13px 0", borderRadius: 12, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}
+                  >
+                    Start another session
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Mock Test card */}
@@ -3356,6 +3562,20 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           )}
         </div>
       </div>
+      {studySession.status === "active" && view !== "studywithme" && (
+        <div
+          onClick={() => setView("studywithme")}
+          style={{
+            position: "fixed", bottom: 24, left: 24, zIndex: 50,
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "9px 16px", borderRadius: 999,
+            background: ACCENT, color: "#fff", fontSize: 12.5, fontWeight: 700,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.18)", cursor: "pointer",
+          }}
+        >
+          <Timer size={14} /> {formatStudyTimer(studySession.secondsLeft)} · Back to session
+        </div>
+      )}
       <AvatarWidget
         isSpeaking={speakingIndex !== null}
         isLoading={loadingIndex !== null}
