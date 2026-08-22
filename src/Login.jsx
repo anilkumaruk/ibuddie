@@ -52,16 +52,30 @@ export default function Login({ onLogin }) {
     }
   }
 
+  // Firebase requires full E.164 format (e.g. +918861142813). Most users just
+  // type their bare 10-digit number, so normalize it instead of rejecting it —
+  // that's what was causing auth/invalid-phone-number.
+  function toE164(raw) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("+")) return `+${trimmed.slice(1).replace(/\D/g, "")}`;
+    const digits = trimmed.replace(/\D/g, "");
+    if (digits.length === 10) return `+91${digits}`; // bare Indian mobile number
+    if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+    return `+${digits}`;
+  }
+
   async function handleSendOtp() {
     setError("");
-    if (!phone.trim() || phone.trim().length < 10) {
-      setError("Enter a valid phone number with country code, e.g. +91XXXXXXXXXX");
+    const digitsOnly = phone.trim().replace(/\D/g, "");
+    if (digitsOnly.length < 10) {
+      setError("Enter your 10-digit mobile number.");
       return;
     }
+    const e164Phone = toE164(phone);
     setBusy(true);
     try {
       setupRecaptcha();
-      const result = await signInWithPhoneNumber(auth, phone.trim(), window.recaptchaVerifier);
+      const result = await signInWithPhoneNumber(auth, e164Phone, window.recaptchaVerifier);
       setConfirmationResult(result);
       setMode("otp");
     } catch (e) {
@@ -125,13 +139,21 @@ export default function Login({ onLogin }) {
         {mode === "phone" && (
           <>
             <label style={{ fontSize: 12.5, fontWeight: 600, color: "#5C5680", marginBottom: 6, display: "block" }}>Mobile number</label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+91XXXXXXXXXX"
-              style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #EDEBF7", fontSize: 14, marginBottom: 14, outline: "none", boxSizing: "border-box" }}
-            />
+            <div style={{ display: "flex", alignItems: "center", border: "1px solid #EDEBF7", borderRadius: 12, marginBottom: 14, overflow: "hidden" }}>
+              <span style={{ padding: "12px 10px 12px 14px", fontSize: 14, color: "#5C5680", fontWeight: 600, borderRight: "1px solid #EDEBF7" }}>+91</span>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => {
+                  let digits = e.target.value.replace(/\D/g, "");
+                  if (digits.length > 10 && digits.startsWith("91")) digits = digits.slice(2); // handle pasted +91/91 prefix
+                  setPhone(digits.slice(0, 10));
+                }}
+                placeholder="8861142813"
+                maxLength={10}
+                style={{ flex: 1, padding: "12px 14px", border: "none", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+              />
+            </div>
             <button
               onClick={handleSendOtp}
               disabled={busy}
@@ -145,7 +167,7 @@ export default function Login({ onLogin }) {
 
         {mode === "otp" && (
           <>
-            <label style={{ fontSize: 12.5, fontWeight: 600, color: "#5C5680", marginBottom: 6, display: "block" }}>Enter the 6-digit code sent to {phone}</label>
+            <label style={{ fontSize: 12.5, fontWeight: 600, color: "#5C5680", marginBottom: 6, display: "block" }}>Enter the 6-digit code sent to {toE164(phone)}</label>
             <input
               type="text"
               value={otp}
