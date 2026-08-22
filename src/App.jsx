@@ -13,7 +13,7 @@ import { db } from "./Login.jsx";
 import { STORED_PYQ_PAPERS } from "./data/pyqPapers.js";
 import { FORMULA_BANK } from "./data/formulaBank.js";
 import { predictNeetRank, predictJeeRank, predictKcetRank } from "./data/rankData.js";
-import AvatarWidget from "./AvatarWidget.jsx";
+import AvatarWidget, { ReactiveFace, AvatarKeyframes, INK } from "./AvatarWidget.jsx";
 import VoiceCallModal from "./VoiceCallModal.jsx";
 
 const MODELS = {
@@ -1875,9 +1875,27 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
             {messages.length === 0 && (
               <div style={{ textAlign: "center", color: "#8C7D6B", marginBottom: 22 }}>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+                  <div
+                    style={{
+                      width: 104,
+                      height: 104,
+                      borderRadius: "50%",
+                      background: INK,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      boxShadow: "0 10px 28px rgba(23,20,15,0.16)",
+                      animation: "avatarBob 3.2s ease-in-out infinite",
+                    }}
+                  >
+                    <ReactiveFace size={56} isSpeaking={false} />
+                  </div>
+                </div>
                 <div className="ibuddie-empty-headline" style={{ fontSize: 14.5 }}>
                   {subject === "general" ? "Ask me anything to get started." : `Ask any ${currentSubject.label.toLowerCase()} doubt to get started.`}
                 </div>
+                <AvatarKeyframes />
               </div>
             )}
 
