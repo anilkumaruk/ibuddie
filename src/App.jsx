@@ -2098,7 +2098,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                     title="Talk live with iBuddie"
                   />
                   <button
-                    onClick={sendMessage}
+                    onClick={() => sendMessage()}
                     disabled={loading || (!input.trim() && !attachedImage)}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
