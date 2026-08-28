@@ -6,7 +6,7 @@ import {
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
   BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma, TrendingUp, Brain,
-  Volume2, VolumeX, Loader2, Phone,
+  Volume2, VolumeX, Loader2, Phone, Presentation,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "./Login.jsx";
@@ -15,6 +15,7 @@ import { FORMULA_BANK } from "./data/formulaBank.js";
 import { predictNeetRank, predictJeeRank, predictKcetRank } from "./data/rankData.js";
 import AvatarWidget, { ReactiveFace, AvatarKeyframes, INK } from "./AvatarWidget.jsx";
 import VoiceCallModal from "./VoiceCallModal.jsx";
+import AiLecture from "./AiLecture.jsx";
 
 const MODELS = {
   // gemini: { id: "gemini", label: "Gemini", freeLimit: 20, period: "day", upgradable: false }, // paused — re-add to MODEL_ORDER when ready
@@ -134,6 +135,7 @@ const NAV_ITEMS = [
   { key: "doubt", label: "Doubt Desk", icon: ClipboardCheck },
   { key: "studywithme", label: "Study With Me", icon: Timer },
   { key: "voiceviva", label: "Voice Viva", icon: Mic },
+  { key: "ailecture", label: "AI Lecture", icon: Presentation },
   { key: "mocktest", label: "Daily Mock Test", icon: Calendar },
   { key: "topics", label: "Important Topics", icon: BookMarked },
   { key: "pyq", label: "PYQ Bank", icon: FileQuestion },
@@ -1757,7 +1759,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "voiceviva" ? "VOICE VIVA" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "voiceviva" ? "VOICE VIVA" : view === "ailecture" ? "AI LECTURE" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -2345,6 +2347,10 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           )}
 
           {/* Mock Test card */}
+          {view === "ailecture" && (
+            <AiLecture subject={currentSubject} isGeneral={subject === "general"} />
+          )}
+
           {view === "mocktest" && (
             <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
               {subject === "general" ? (
