@@ -1,6 +1,7 @@
-import { adminStorage } from "../lib/firebaseadmin.js";
-
-const VOICE_SERVICE_URL = "https://ibuddie-voice-1089026974662.asia-south1.run.app/synthesize";
+import { adminDb } from "../lib/firebaseadmin.js";
+import { synthesizeAndUpload } from "../lib/voiceService.js";
+import { lectureCacheKey, lectureStoragePrefix } from "../lib/lectureCache.js";
+import { getPlaybackUrl } from "../lib/storage.js";
 
 // Segments are processed with bounded concurrency instead of strictly serial,
 // because vercel dev's own internal proxy (undici, bundled in @vercel/node)
@@ -11,33 +12,13 @@ const VOICE_SERVICE_URL = "https://ibuddie-voice-1089026974662.asia-south1.run.a
 // the real fix for lectures of unbounded length.
 const CONCURRENCY = 4;
 
-function slugify(text) {
-  return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-}
-
 function timeoutAfter(ms, label) {
   return new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out after ${ms}ms: ${label}`)), ms));
 }
 
-async function processSegment(segment, topicSlug) {
-  const voiceRes = await fetch(VOICE_SERVICE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: segment.narration, languageCode: "en-IN" }),
-  });
-
-  if (!voiceRes.ok) {
-    const errText = await voiceRes.text();
-    throw Object.assign(new Error(`Audio failed on segment ${segment.id}`), { status: 502, details: errText });
-  }
-
-  const audioBuffer = await voiceRes.arrayBuffer();
-  const filePath = `lectures/${topicSlug}/segment-${segment.id}.wav`;
-  const file = adminStorage.file(filePath);
-  await file.save(Buffer.from(audioBuffer), { contentType: "audio/wav" });
-  const [signedUrl] = await file.getSignedUrl({ action: "read", expires: "01-01-2099" });
-
-  return { ...segment, audio_url: signedUrl };
+async function processSegment(segment, storagePrefix) {
+  const audio_url = await synthesizeAndUpload(segment.narration, `${storagePrefix}/segment-${segment.id}.wav`);
+  return { ...segment, audio_url };
 }
 
 async function runWithConcurrency(items, limit, worker) {
@@ -56,31 +37,54 @@ async function runWithConcurrency(items, limit, worker) {
   return results;
 }
 
+// Synthesizes audio for every segment of a lecture script and, when subject/exam are given,
+// caches the finished lecture (script + audio_url per segment) in Firestore so a future
+// request for the same subject+topic+exam is served instantly by generate-lecture.js without
+// touching Sonnet or the voice service again.
+//
+// segmentsWithAudio (and what gets cached to Firestore) carries whatever STABLE reference
+// synthesizeAndUpload returns for each segment — a Firebase signed URL or an "r2://<key>"
+// reference, per STORAGE_PROVIDER (see lib/storage.js). The value returned from this function
+// is a separate, playable-URL copy, resolved via getPlaybackUrl() — so an r2:// reference is
+// never handed back to a caller expecting to actually play the audio.
+async function synthesizeLecture({ topic, segments, subject, exam }) {
+  const storagePrefix = lectureStoragePrefix({ subject: subject || "general", topic, exam });
+  const total = segments.length;
+
+  const segmentsWithAudio = await runWithConcurrency(segments, CONCURRENCY, async (segment) => {
+    console.log(`[${segment.id}/${total}] Starting...`);
+    const result = await Promise.race([
+      processSegment(segment, storagePrefix),
+      timeoutAfter(120000, `segment ${segment.id}`),
+    ]);
+    console.log(`[${segment.id}/${total}] Done.`);
+    return result;
+  });
+
+  if (subject) {
+    const cacheRef = adminDb.collection("lectures").doc(lectureCacheKey({ subject, topic, exam }));
+    await cacheRef.set({ subject, topic, exam: exam || null, segments: segmentsWithAudio, cachedAt: Date.now() });
+  }
+
+  const playableSegments = await Promise.all(
+    segmentsWithAudio.map(async (segment) => ({ ...segment, audio_url: await getPlaybackUrl(segment.audio_url) }))
+  );
+  return { topic, segments: playableSegments };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const lecture = req.body;
-  if (!lecture?.topic || !Array.isArray(lecture.segments)) {
+  const { topic, segments, subject, exam } = req.body;
+  if (!topic || !Array.isArray(segments)) {
     return res.status(400).json({ error: "Expected a lecture object with topic and segments" });
   }
 
-  const topicSlug = slugify(lecture.topic);
-  const total = lecture.segments.length;
-
   try {
-    const segmentsWithAudio = await runWithConcurrency(lecture.segments, CONCURRENCY, async (segment) => {
-      console.log(`[${segment.id}/${total}] Starting...`);
-      const result = await Promise.race([
-        processSegment(segment, topicSlug),
-        timeoutAfter(120000, `segment ${segment.id}`),
-      ]);
-      console.log(`[${segment.id}/${total}] Done.`);
-      return result;
-    });
-
-    return res.status(200).json({ topic: lecture.topic, segments: segmentsWithAudio });
+    const result = await synthesizeLecture({ topic, segments, subject, exam });
+    return res.status(200).json(result);
   } catch (e) {
     console.log(`FAILED:`, e.message);
     return res.status(e.status || 504).json({ error: e.message, details: e.details });

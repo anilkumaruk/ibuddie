@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test lib/"
   },
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "firebase": "^12.18.0",
     "firebase-admin": "^13.10.0",
     "lucide-react": "^1.29.0",

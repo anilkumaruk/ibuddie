@@ -12,7 +12,7 @@ const RED = "#B23B3B";
 // Plays a generated lecture (slides + narration audio) like a video: shows the current
 // segment's slide, plays its audio, and auto-advances when that audio ends. Follows the
 // same setup -> loading -> active -> complete pattern used by Mock Test / Study Plan.
-export default function AiLecture({ subject, isGeneral }) {
+export default function AiLecture({ subject, isGeneral, exam }) {
   const [stage, setStage] = useState("setup"); // "setup" | "loading" | "active" | "complete" | "error"
   const [topic, setTopic] = useState("");
   const [loadingPhase, setLoadingPhase] = useState("script"); // "script" | "audio"
@@ -59,11 +59,21 @@ export default function AiLecture({ subject, isGeneral }) {
       const scriptRes = await fetch("/api/generate-lecture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: subject.label, topic: trimmedTopic }),
+        body: JSON.stringify({ subject: subject.label, topic: trimmedTopic, exam }),
       });
       const scriptData = await scriptRes.json();
       if (!scriptRes.ok || !Array.isArray(scriptData.segments)) {
         throw new Error(scriptData.error || `Server error (${scriptRes.status})`);
+      }
+
+      // A cached lecture already carries a playable audio_url on every segment — skip the
+      // audio-generation call entirely rather than re-synthesizing narration that already exists.
+      if (scriptData.cached) {
+        clearInterval(elapsedTimerRef.current);
+        setLecture(scriptData);
+        setStage("active");
+        playSegmentAt(0, scriptData);
+        return;
       }
 
       setLoadingPhase("audio");

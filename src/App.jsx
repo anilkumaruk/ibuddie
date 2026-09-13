@@ -2348,7 +2348,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
           {/* Mock Test card */}
           {view === "ailecture" && (
-            <AiLecture subject={currentSubject} isGeneral={subject === "general"} />
+            <AiLecture subject={currentSubject} isGeneral={subject === "general"} exam={exam} />
           )}
 
           {view === "mocktest" && (
