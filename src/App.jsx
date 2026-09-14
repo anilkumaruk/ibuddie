@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Atom, FlaskConical, Dna, Calculator, LayoutGrid,
   ClipboardCheck, Calendar, Settings, Bell, Mic,
@@ -13,6 +14,7 @@ import { db } from "./Login.jsx";
 import { STORED_PYQ_PAPERS } from "./data/pyqPapers.js";
 import { FORMULA_BANK } from "./data/formulaBank.js";
 import { predictNeetRank, predictJeeRank, predictKcetRank } from "./data/rankData.js";
+import { PUC_SYLLABUS } from "./data/pucSyllabus.js";
 import AvatarWidget, { ReactiveFace, AvatarKeyframes, INK } from "./AvatarWidget.jsx";
 import VoiceCallModal from "./VoiceCallModal.jsx";
 import AiLecture from "./AiLecture.jsx";
@@ -100,9 +102,6 @@ const BADGE_DEFS = [
 const ACCENT = "#17140F"; // landing page's "ink"
 const GREEN = "#2F6B4A"; // landing page's checkmark green
 
-// Standard Karnataka PUC / NCERT-aligned chapter lists, used for the PYQ Bank's
-// browse-by-chapter mode. Hardcoded rather than AI-generated since syllabus structure
-// is stable factual data, not something worth risking a generation failure over.
 // Direct links to the actual original PDF papers (unprocessed, exactly as printed),
 // hosted in the ibuddie-pyq GitHub repo. Keyed as `${exam}_${year}_${setNumber}`.
 const STORED_PDF_PAPERS = {
@@ -110,25 +109,6 @@ const STORED_PDF_PAPERS = {
   "NEET_2026_60": "https://raw.githubusercontent.com/anilkumaruk/ibuddie-pyq/main/neet%202026%20set%2060.pdf",
   "NEET_2026_70": "https://raw.githubusercontent.com/anilkumaruk/ibuddie-pyq/main/neet%202026%20set%2070.pdf",
   "NEET_2026_80": "https://raw.githubusercontent.com/anilkumaruk/ibuddie-pyq/main/neet%202026%20set%2080.pdf",
-};
-
-const PUC_SYLLABUS = {
-  Physics: {
-    "1st": ["Physical World and Measurement", "Kinematics", "Laws of Motion", "Work, Energy and Power", "Motion of System of Particles and Rigid Body", "Gravitation", "Mechanical Properties of Solids and Fluids", "Thermal Properties of Matter", "Thermodynamics", "Kinetic Theory", "Oscillations", "Waves"],
-    "2nd": ["Electrostatics", "Current Electricity", "Magnetic Effects of Current and Magnetism", "Electromagnetic Induction and AC", "Electromagnetic Waves", "Ray Optics and Optical Instruments", "Wave Optics", "Dual Nature of Matter and Radiation", "Atoms and Nuclei", "Electronic Devices", "Communication Systems"],
-  },
-  Chemistry: {
-    "1st": ["Some Basic Concepts of Chemistry", "Structure of Atom", "Classification of Elements and Periodicity", "Chemical Bonding and Molecular Structure", "States of Matter", "Thermodynamics", "Equilibrium", "Redox Reactions", "Hydrogen", "The s-Block Elements", "The p-Block Elements (Groups 13-14)", "Organic Chemistry — Basic Principles", "Hydrocarbons", "Environmental Chemistry"],
-    "2nd": ["Solid State", "Solutions", "Electrochemistry", "Chemical Kinetics", "Surface Chemistry", "The p-Block Elements", "The d and f Block Elements", "Coordination Compounds", "Haloalkanes and Haloarenes", "Alcohols, Phenols and Ethers", "Aldehydes, Ketones and Carboxylic Acids", "Amines", "Biomolecules", "Polymers", "Chemistry in Everyday Life"],
-  },
-  Biology: {
-    "1st": ["Diversity in Living World", "Structural Organisation in Animals and Plants", "Cell Structure and Function", "Plant Physiology", "Human Physiology"],
-    "2nd": ["Reproduction", "Genetics and Evolution", "Biology and Human Welfare", "Biotechnology and Its Applications", "Ecology and Environment"],
-  },
-  Mathematics: {
-    "1st": ["Sets", "Relations and Functions", "Trigonometric Functions", "Complex Numbers", "Linear Inequalities", "Permutations and Combinations", "Binomial Theorem", "Sequences and Series", "Straight Lines", "Conic Sections", "Introduction to 3D Geometry", "Limits and Derivatives", "Statistics", "Probability"],
-    "2nd": ["Relations and Functions", "Inverse Trigonometric Functions", "Matrices", "Determinants", "Continuity and Differentiability", "Application of Derivatives", "Integrals", "Application of Integrals", "Differential Equations", "Vector Algebra", "Three Dimensional Geometry", "Linear Programming", "Probability"],
-  },
 };
 
 const NAV_ITEMS = [
@@ -144,6 +124,31 @@ const NAV_ITEMS = [
   { key: "rankpredictor", label: "Rank Predictor", icon: TrendingUp },
   { key: "revision", label: "Revision Reminders", icon: Brain },
 ];
+
+// The URL is the source of truth for which module is open. Every `view` value already used
+// throughout this file (see NAV_ITEMS above and the `view === "..."` render blocks below) maps
+// to exactly one canonical path here; VIEW_TO_PATH is what `setView()` navigates to, and its
+// inverse is how the current `view` is derived from location.pathname on every render — so a
+// direct link, a refresh, or the browser's Back/Forward buttons all resolve the same way a
+// sidebar click does. Only the first path segment is matched (see `view` below), so a future
+// deep route like "/ai-lecture/physics/laws-of-motion" already resolves to the "ailecture"
+// module without any change here.
+const VIEW_TO_PATH = {
+  doubt: "/doubt-desk",
+  studywithme: "/study-with-me",
+  voiceviva: "/voice-viva",
+  ailecture: "/ai-lecture",
+  mocktest: "/mock-test",
+  topics: "/important-topics",
+  pyq: "/pyq-bank",
+  studyplan: "/study-plan",
+  formulas: "/formula-bank",
+  rankpredictor: "/rank-predictor",
+  revision: "/revision-reminders",
+};
+const SEGMENT_TO_VIEW = Object.fromEntries(
+  Object.entries(VIEW_TO_PATH).map(([view, path]) => [path.slice(1), view])
+);
 
 function parseReply(raw) {
   const lines = raw.split("\n");
@@ -219,7 +224,21 @@ export default function App({ user, onLogout }) {
   const [upgradeModel, setUpgradeModel] = useState(null); // which model triggered the paywall
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(null); // "haiku" | "sonnet" | null while a cancel request is in flight
-  const [view, setView] = useState("doubt"); // "doubt" | "mocktest" | "topics"
+  // `view` used to be its own useState — it's now derived from the URL (see VIEW_TO_PATH /
+  // SEGMENT_TO_VIEW above) so the browser's address bar, Back/Forward, and refresh all stay in
+  // sync with which module is open. Only the first path segment is matched, so "/" and any
+  // unrecognized path both fall back to "doubt" (the existing default/home module), and a
+  // future deep path like "/ai-lecture/physics/laws-of-motion" already resolves to "ailecture".
+  // Every other read of `view` in this file (NAV_ITEMS highlighting, the header label, the
+  // per-module render blocks) is unchanged — this is a drop-in replacement for the old
+  // useState pair, not a restructure of how modules are rendered.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const view = SEGMENT_TO_VIEW[location.pathname.split("/")[1] || ""] ?? "doubt";
+  function setView(key) {
+    const path = VIEW_TO_PATH[key];
+    if (path && path !== location.pathname) navigate(path);
+  }
   const [mockTest, setMockTest] = useState({
     status: "setup", // "setup" | "loading" | "active" | "results"
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,
@@ -2348,7 +2367,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
           {/* Mock Test card */}
           {view === "ailecture" && (
-            <AiLecture subject={currentSubject} isGeneral={subject === "general"} />
+            <AiLecture subject={currentSubject} isGeneral={subject === "general"} exam={exam} />
           )}
 
           {view === "mocktest" && (
