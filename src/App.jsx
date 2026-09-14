@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Atom, FlaskConical, Dna, Calculator, LayoutGrid,
   ClipboardCheck, Calendar, Settings, Bell, Mic,
@@ -124,6 +125,31 @@ const NAV_ITEMS = [
   { key: "revision", label: "Revision Reminders", icon: Brain },
 ];
 
+// The URL is the source of truth for which module is open. Every `view` value already used
+// throughout this file (see NAV_ITEMS above and the `view === "..."` render blocks below) maps
+// to exactly one canonical path here; VIEW_TO_PATH is what `setView()` navigates to, and its
+// inverse is how the current `view` is derived from location.pathname on every render — so a
+// direct link, a refresh, or the browser's Back/Forward buttons all resolve the same way a
+// sidebar click does. Only the first path segment is matched (see `view` below), so a future
+// deep route like "/ai-lecture/physics/laws-of-motion" already resolves to the "ailecture"
+// module without any change here.
+const VIEW_TO_PATH = {
+  doubt: "/doubt-desk",
+  studywithme: "/study-with-me",
+  voiceviva: "/voice-viva",
+  ailecture: "/ai-lecture",
+  mocktest: "/mock-test",
+  topics: "/important-topics",
+  pyq: "/pyq-bank",
+  studyplan: "/study-plan",
+  formulas: "/formula-bank",
+  rankpredictor: "/rank-predictor",
+  revision: "/revision-reminders",
+};
+const SEGMENT_TO_VIEW = Object.fromEntries(
+  Object.entries(VIEW_TO_PATH).map(([view, path]) => [path.slice(1), view])
+);
+
 function parseReply(raw) {
   const lines = raw.split("\n");
   let topic = "";
@@ -198,7 +224,21 @@ export default function App({ user, onLogout }) {
   const [upgradeModel, setUpgradeModel] = useState(null); // which model triggered the paywall
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(null); // "haiku" | "sonnet" | null while a cancel request is in flight
-  const [view, setView] = useState("doubt"); // "doubt" | "mocktest" | "topics"
+  // `view` used to be its own useState — it's now derived from the URL (see VIEW_TO_PATH /
+  // SEGMENT_TO_VIEW above) so the browser's address bar, Back/Forward, and refresh all stay in
+  // sync with which module is open. Only the first path segment is matched, so "/" and any
+  // unrecognized path both fall back to "doubt" (the existing default/home module), and a
+  // future deep path like "/ai-lecture/physics/laws-of-motion" already resolves to "ailecture".
+  // Every other read of `view` in this file (NAV_ITEMS highlighting, the header label, the
+  // per-module render blocks) is unchanged — this is a drop-in replacement for the old
+  // useState pair, not a restructure of how modules are rendered.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const view = SEGMENT_TO_VIEW[location.pathname.split("/")[1] || ""] ?? "doubt";
+  function setView(key) {
+    const path = VIEW_TO_PATH[key];
+    if (path && path !== location.pathname) navigate(path);
+  }
   const [mockTest, setMockTest] = useState({
     status: "setup", // "setup" | "loading" | "active" | "results"
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,

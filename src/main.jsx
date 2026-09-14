@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import App from "./App.jsx";
 import Login, { auth } from "./Login.jsx";
@@ -94,4 +95,13 @@ function Root() {
   return user ? <App user={user} onLogout={handleLogout} /> : <Login onLogin={setUser} />;
 }
 
-createRoot(document.getElementById("root")).render(<Root />);
+// App.jsx owns the actual module -> URL mapping (see VIEW_TO_PATH/SEGMENT_TO_VIEW there) and
+// derives its `view` state from useLocation() directly, rather than matching against a
+// <Routes> tree — the whole app (sidebar, header, every module) already lives in one
+// component keyed off a single `view` string, so BrowserRouter only needs to supply router
+// context (history, location) for that existing switch to read from.
+createRoot(document.getElementById("root")).render(
+  <BrowserRouter>
+    <Root />
+  </BrowserRouter>
+);
