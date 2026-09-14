@@ -17,6 +17,7 @@ import { predictNeetRank, predictJeeRank, predictKcetRank } from "./data/rankDat
 import { PUC_SYLLABUS } from "./data/pucSyllabus.js";
 import AvatarWidget, { ReactiveFace, AvatarKeyframes, INK } from "./AvatarWidget.jsx";
 import VoiceCallModal from "./VoiceCallModal.jsx";
+import DoubtDeskBanner from "./components/DoubtDeskBanner.jsx";
 import AiLecture from "./AiLecture.jsx";
 
 const MODELS = {
@@ -1865,7 +1866,10 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
           {/* Chat card */}
           {view === "doubt" && (
-          <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 24, display: "flex", flexDirection: "column", minHeight: 0, justifyContent: messages.length === 0 ? "center" : undefined }}>
+          <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            {messages.length === 0 && (
+              <DoubtDeskBanner />
+            )}
             {messages.length > 0 && (
               <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
                 {messages.map((m, i) =>
@@ -1984,7 +1988,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
             )}
 
             {messages.length === 0 && (
-              <div style={{ textAlign: "center", color: "#8C7D6B", marginBottom: 22 }}>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", color: "#8C7D6B", marginBottom: 22, minHeight: 0 }}>
                 <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
                   <div
                     style={{
