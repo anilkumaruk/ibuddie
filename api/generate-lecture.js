@@ -1,26 +1,10 @@
 // Was runtime: "edge" — switched to Node.js because Firestore access (adminDb, via
-// firebase-admin) requires Node built-ins that Edge's runtime doesn't provide. A full lecture
-// generation genuinely takes 90-150+ seconds; Node has no Edge-style fixed time-to-first-byte
-// requirement, just a duration ceiling this is set comfortably under.
-export const config = { maxDuration: 300 };
+// firebase-admin) requires Node built-ins that Edge's runtime doesn't provide.
+export const config = { maxDuration: 60 };
 
 import { adminDb } from "../lib/firebaseadmin.js";
 import { lectureCacheKey } from "../lib/lectureCache.js";
 import { getPlaybackUrl } from "../lib/storage.js";
-
-const SYSTEM_PROMPT = `You are a JEE/NEET/KCET lecture writer for iBuddie, an Indian exam-prep platform.
-
-Given a subject and topic, produce a spoken lecture broken into segments. Each segment has:
-- slide_title: short heading shown on screen
-- slide_bullets: 2-4 short bullet points shown on screen
-- narration: what is spoken aloud, in plain conversational spoken English (no markdown, spell out formulas in words — "F equals m a", not "F = ma")
-
-Rules:
-- Produce 8-15 segments: an engaging intro, each major concept in its own segment, at least one worked numerical example, a recap segment, and one practice question at the end.
-- Narration must be scientifically accurate. Never invent facts, formulas, or exam information. If uncertain about something, omit it rather than guess.
-- Keep each narration segment to roughly 30-90 seconds of natural spoken pacing (about 75-220 words). Double-check every word boundary in the narration text before finishing — never let two words run together with no space (e.g. write "does not change", never "doesnotchange").
-- Output ONLY valid JSON matching this exact shape, nothing else, no markdown code fences:
-{"topic": string, "segments": [{"id": number, "slide_title": string, "slide_bullets": [string], "narration": string}]}`;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -49,38 +33,11 @@ export default async function handler(req, res) {
     return res.status(200).json({ topic, segments: playableSegments, cached: true });
   }
 
-  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-5",
-      max_tokens: 8000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: `Subject: ${subject}\nTopic: ${topic}` }],
-    }),
-  });
-
-  if (!anthropicRes.ok) {
-    const errText = await anthropicRes.text();
-    return res.status(anthropicRes.status).json({ error: "Lecture generation failed", details: errText });
-  }
-
-  const data = await anthropicRes.json();
-  console.error("DEBUG stop_reason:", data.stop_reason, "content types:", JSON.stringify(data.content?.map(b => b.type)));
-
-  const textBlock = data.content?.find((b) => b.type === "text");
-  const rawText = textBlock?.text ?? "";
-
-  let lecture;
-  try {
-    lecture = JSON.parse(rawText);
-  } catch {
-    return res.status(502).json({ error: "Model did not return valid JSON", raw: rawText });
-  }
-
-  return res.status(200).json(lecture);
+  // The AI Lecture library is pre-generated offline (scripts/pregenerate-lectures.js), not
+  // grown from live student requests — a cache miss here means this exact subject+topic+exam
+  // combination simply isn't in the library yet, not "go generate one now". The client's topic
+  // picker only ever offers chapters this endpoint already reports as cached, so reaching this
+  // point at all means either a stale client catalog or a direct/unexpected API call — either
+  // way, the correct response is "not available", never a live Sonnet + TTS generation.
+  return res.status(404).json({ error: "not_available", cached: false });
 }
