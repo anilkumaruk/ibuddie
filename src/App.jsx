@@ -1868,7 +1868,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           {view === "doubt" && (
           <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {messages.length === 0 && (
-              <DoubtDeskBanner />
+              <DoubtDeskBanner userName={user?.name} streak={streakData.current} xp={xp} exam={exam} />
             )}
             {messages.length > 0 && (
               <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, minHeight: 0 }}>
