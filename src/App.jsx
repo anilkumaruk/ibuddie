@@ -1875,7 +1875,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 {messages.map((m, i) =>
                   m.role === "user" ? (
                     <div key={i} style={{ alignSelf: "flex-end", maxWidth: "82%" }}>
-                      <div className="ibuddie-user-bubble" style={{ background: ACCENT, color: "#fff", padding: "14px 18px", borderRadius: "16px 16px 4px 16px", fontSize: 15.5, lineHeight: 1.6, textAlign: "left" }}>
+                      <div className="ibuddie-user-bubble" style={{ background: ACCENT, color: "#fff", padding: "14px 18px", borderRadius: "16px 16px 4px 16px", fontSize: 15, lineHeight: 1.6, textAlign: "left" }}>
                         {m.imagePreview && (
                           <img src={m.imagePreview} alt="attached" style={{ width: "100%", maxWidth: 220, borderRadius: 10, marginBottom: 8, display: "block" }} />
                         )}
@@ -1924,7 +1924,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                           </div>
                         ) : (
                           seg.content.trim() && (
-                            <div key={si} className="ibuddie-ai-bubble" style={{ background: "#F2F2F0", padding: "16px 18px", borderRadius: "4px 16px 16px 16px", fontSize: 15.5, lineHeight: 1.75, color: "#2B2018", whiteSpace: "pre-wrap", marginBottom: 4, textAlign: "left" }}>
+                            <div key={si} className="ibuddie-ai-bubble" style={{ background: "#F2F2F0", padding: "16px 18px", borderRadius: "4px 16px 16px 16px", fontSize: 15, lineHeight: 1.75, color: "#2B2018", whiteSpace: "pre-wrap", marginBottom: 4, textAlign: "left" }}>
                               {seg.content.trim()}
                             </div>
                           )
