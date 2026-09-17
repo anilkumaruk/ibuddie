@@ -1642,7 +1642,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           {sidebarOpen ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 6px", marginBottom: 26, justifyContent: sidebarOpen ? "flex-start" : "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 6px", marginBottom: 18, justifyContent: sidebarOpen ? "flex-start" : "center", flexWrap: "wrap" }}>
           {sidebarOpen ? (
             <>
               <span style={{ fontSize: 22, fontWeight: 800, color: "var(--ibuddie-sidebar-text)" }}>i<span style={{ color: "#B8860B" }}>Buddie</span></span>
@@ -1662,7 +1662,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           )}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {NAV_ITEMS.map((item) => (
             <div
               key={item.key}
@@ -1675,7 +1675,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               }}
               style={{
                 display: "flex", alignItems: "center", gap: 11,
-                padding: sidebarOpen ? "10px 12px" : "10px 0",
+                padding: sidebarOpen ? "7px 12px" : "7px 0",
                 justifyContent: sidebarOpen ? "flex-start" : "center",
                 borderRadius: 10,
                 background: view === item.key ? ACCENT : "transparent",
@@ -1698,10 +1698,10 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
         {/* Chat History */}
         {sidebarOpen && (
-          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--ibuddie-sidebar-border)", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div style={{ fontWeight: 700, fontSize: 12.5, color: "var(--ibuddie-sidebar-muted)", marginBottom: 12, letterSpacing: "0.03em", textTransform: "uppercase" }}>Chat History</div>
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--ibuddie-sidebar-border)", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{ fontWeight: 700, fontSize: 12.5, color: "var(--ibuddie-sidebar-muted)", marginBottom: 8, letterSpacing: "0.03em", textTransform: "uppercase" }}>Chat History</div>
             {conversations.length > 0 && (
-              <div style={{ position: "relative", marginBottom: 10 }}>
+              <div style={{ position: "relative", marginBottom: 8 }}>
                 <Search size={13} color="var(--ibuddie-sidebar-muted)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
                 <input
                   type="text"
@@ -1737,7 +1737,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               }
 
               return (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0, overflowY: "auto" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 200, overflowY: "auto" }}>
                   {results.map(({ conv, snippet }) => {
                     const s = SUBJECTS.find((sub) => sub.id === conv.subject);
                     return (
