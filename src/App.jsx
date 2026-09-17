@@ -1108,7 +1108,7 @@ export default function App({ user, onLogout }) {
     setAttachedImage(null);
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: displayText || question || "(sent an image)", imagePreview: imageForSend?.previewUrl, subject, exam, model: selectedModel, ts: Date.now() },
+      { role: "user", content: displayText || question || "(sent an image)", ...(imageForSend?.previewUrl ? { imagePreview: imageForSend.previewUrl } : {}), subject, exam, model: selectedModel, ts: Date.now() },
     ]);
     setLoading(true);
 
