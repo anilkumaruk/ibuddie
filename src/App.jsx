@@ -1698,7 +1698,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
 
         {/* Chat History */}
         {sidebarOpen && (
-          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--ibuddie-sidebar-border)", minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--ibuddie-sidebar-border)", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <div style={{ fontWeight: 700, fontSize: 12.5, color: "var(--ibuddie-sidebar-muted)", marginBottom: 12, letterSpacing: "0.03em", textTransform: "uppercase" }}>Chat History</div>
             {conversations.length > 0 && (
               <div style={{ position: "relative", marginBottom: 10 }}>
@@ -1737,7 +1737,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               }
 
               return (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 280, overflowY: "auto" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0, overflowY: "auto" }}>
                   {results.map(({ conv, snippet }) => {
                     const s = SUBJECTS.find((sub) => sub.id === conv.subject);
                     return (
@@ -1766,7 +1766,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           </div>
         )}
 
-        <div style={{ flex: 1 }} />
+        {!sidebarOpen && <div style={{ flex: 1 }} />}
       </div>
 
       {/* Main */}
