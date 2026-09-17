@@ -1770,10 +1770,10 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
       </div>
 
       {/* Main */}
-      <div className="ibuddie-main" style={{ flex: 1, display: "flex", padding: "22px 10px", gap: 20, minWidth: 0, height: "100vh", overflow: "hidden" }}>
+      <div className="ibuddie-main" style={{ flex: 1, display: "flex", padding: isMobile ? "14px 10px 22px" : "8px 10px 22px", gap: 20, minWidth: 0, height: "100vh", overflow: "hidden" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
           {/* Top bar */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isMobile ? 10 : 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isMobile ? 8 : 3 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {isMobile && (
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
@@ -1827,14 +1827,14 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           </div>
 
           {/* Subject cards + exam pills */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isMobile ? 10 : 8, flexWrap: "wrap", gap: 12 }}>
-            <div className="ibuddie-subjects" style={{ display: "flex", gap: isMobile ? 6 : 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isMobile ? 8 : 2, flexWrap: "wrap", gap: 12 }}>
+            <div className="ibuddie-subjects" style={{ display: "flex", gap: isMobile ? 5 : 5 }}>
               {SUBJECTS.map((s) => (
                 <div
                   key={s.id}
                   onClick={() => { setSubject(s.id); setPyqStep("browse"); setPyqSetNumber(""); setPyqBrowseMode("questions"); setMockTestChapter(""); }}
                   style={{
-                    width: isMobile ? 50 : 56, padding: isMobile ? "7px 5px" : "8px 5px", borderRadius: isMobile ? 9 : 10, textAlign: "center", cursor: "pointer",
+                    width: isMobile ? 50 : 56, padding: isMobile ? "6px 5px" : "6px 5px", borderRadius: isMobile ? 9 : 10, textAlign: "center", cursor: "pointer",
                     background: subject === s.id ? `${s.color}14` : "#FFFFFF",
                     border: subject === s.id ? `1.5px solid ${s.color}` : "1.5px solid #E4E2DA",
                   }}
