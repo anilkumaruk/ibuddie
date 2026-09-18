@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">iBuddie</string>
+    <string name="title_activity_main">iBuddie</string>
+    <string name="package_name">in.ibuddie.app</string>
+    <string name="custom_url_scheme">in.ibuddie.app</string>
+</resources>

@@ -1,0 +1,8 @@
+{
+  "appId": "in.ibuddie.app",
+  "appName": "iBuddie",
+  "webDir": "dist",
+  "server": {
+    "url": "https://ai.ibuddie.in"
+  }
+}

@@ -11,6 +11,9 @@
     "test": "node --test lib/"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/cli": "^7.6.9",
+    "@capacitor/core": "^7.6.9",
     "aws4fetch": "^1.0.20",
     "firebase": "^12.18.0",
     "firebase-admin": "^13.10.0",
