@@ -40,14 +40,16 @@ async function runWithConcurrency(items, limit, worker) {
 // Synthesizes audio for every segment of a lecture script and, when subject/exam are given,
 // caches the finished lecture (script + audio_url per segment) in Firestore so a future
 // request for the same subject+topic+exam is served instantly by generate-lecture.js without
-// touching Sonnet or the voice service again.
+// touching Sonnet or the voice service again. subject/exam are optional so this stays usable
+// for ad-hoc/one-off audio synthesis, but every real caller (AiLecture.jsx, the batch
+// pre-generation script) passes them.
 //
 // segmentsWithAudio (and what gets cached to Firestore) carries whatever STABLE reference
 // synthesizeAndUpload returns for each segment — a Firebase signed URL or an "r2://<key>"
 // reference, per STORAGE_PROVIDER (see lib/storage.js). The value returned from this function
 // is a separate, playable-URL copy, resolved via getPlaybackUrl() — so an r2:// reference is
 // never handed back to a caller expecting to actually play the audio.
-async function synthesizeLecture({ topic, segments, subject, exam }) {
+export async function synthesizeLecture({ topic, segments, subject, exam }) {
   const storagePrefix = lectureStoragePrefix({ subject: subject || "general", topic, exam });
   const total = segments.length;
 

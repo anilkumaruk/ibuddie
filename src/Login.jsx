@@ -2,7 +2,7 @@ import { useState } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signInWithCustomToken,
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithCustomToken, signInAnonymously,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
 } from "firebase/auth";
 
@@ -21,8 +21,16 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 const ACCENT = "#6D5AE6";
 
-export default function Login({ onLogin }) {
-  const [mode, setMode] = useState("choice"); // choice | phone | otp | email
+// The one and only Google sign-in path. Exported so the guest-limit prompt inside the app
+// (App.jsx) can reuse it verbatim instead of growing a second, divergent implementation —
+// native Google authentication itself is unchanged.
+export async function signInWithGooglePopup() {
+  const provider = new GoogleAuthProvider();
+  return signInWithPopup(auth, provider);
+}
+
+export default function Login({ onLogin, initialMode = "choice" }) {
+  const [mode, setMode] = useState(initialMode); // choice | phone | otp | email
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSession, setOtpSession] = useState(null); // { sessionId, phone } from /api/send-otp
@@ -31,19 +39,40 @@ export default function Login({ onLogin }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [guestBusy, setGuestBusy] = useState(false); // only the "Continue as guest" link, so it can show its own pending label
 
   async function handleGoogleLogin() {
     setError("");
     setBusy(true);
     try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
+      const result = await signInWithGooglePopup();
       onLogin({ name: result.user.displayName, uid: result.user.uid, method: "google" });
     } catch (e) {
       console.error("Google sign-in error:", e.code, e.message);
       setError(`Google sign-in failed: ${e.code || e.message}`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // A deliberately quiet third option: sign in anonymously and drop straight into the real
+  // app. Firebase issues a normal (anonymous) ID token for this session, which is what the
+  // server uses to hold the guest to two Doubt Desk questions.
+  async function handleGuestLogin() {
+    setError("");
+    setGuestBusy(true);
+    try {
+      const result = await signInAnonymously(auth);
+      onLogin({ name: "Guest", uid: result.user.uid, method: "guest", isGuest: true });
+    } catch (e) {
+      console.error("Guest sign-in error:", e.code, e.message);
+      setError(
+        e.code === "auth/operation-not-allowed" || e.code === "auth/admin-restricted-operation"
+          ? "Guest access isn't available right now — please sign in with Google or Email."
+          : `Couldn't start a guest session: ${e.code || e.message}`
+      );
+    } finally {
+      setGuestBusy(false);
     }
   }
 
@@ -189,6 +218,29 @@ export default function Login({ onLogin }) {
             >
               Continue with Email
             </button>
+
+            {/* Secondary, on purpose: a plain text link under the real login options rather
+                than a fourth button competing with them. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 18, marginBottom: 12 }}>
+              <div style={{ flex: 1, height: 1, background: "#EDEBF7" }} />
+              <span style={{ fontSize: 11.5, color: "#A9A3C6", fontWeight: 500 }}>or</span>
+              <div style={{ flex: 1, height: 1, background: "#EDEBF7" }} />
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <button
+                type="button"
+                onClick={handleGuestLogin}
+                disabled={busy || guestBusy}
+                style={{
+                  background: "none", border: "none", padding: 4, font: "inherit",
+                  fontSize: 13, fontWeight: 500, color: "#8B85AE",
+                  textDecoration: "underline", textUnderlineOffset: 3,
+                  cursor: busy || guestBusy ? "default" : "pointer",
+                }}
+              >
+                {guestBusy ? "Opening iBuddie…" : "Continue as guest"}
+              </button>
+            </div>
           </>
         )}
 

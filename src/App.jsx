@@ -10,7 +10,11 @@ import {
   Volume2, VolumeX, Loader2, Phone, Presentation,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
-import { db } from "./Login.jsx";
+import { db, signInWithGooglePopup } from "./Login.jsx";
+import { authHeaders } from "./apiAuth.js";
+import {
+  GUEST_FREE_QUESTIONS, GUEST_LIMIT_CODE, GUEST_LIMIT_TITLE, GUEST_LIMIT_SUBTITLE, GUEST_REMAINING_HEADER,
+} from "../lib/guestQuota.js";
 import { STORED_PYQ_PAPERS } from "./data/pyqPapers.js";
 import { FORMULA_BANK } from "./data/formulaBank.js";
 import { predictNeetRank, predictJeeRank, predictKcetRank } from "./data/rankData.js";
@@ -19,6 +23,7 @@ import AvatarWidget, { ReactiveFace, AvatarKeyframes, INK } from "./AvatarWidget
 import VoiceCallModal from "./VoiceCallModal.jsx";
 import DoubtDeskBanner from "./components/DoubtDeskBanner.jsx";
 import AiLecture from "./AiLecture.jsx";
+import { renderFormula } from "./renderFormula.jsx";
 
 const MODELS = {
   // gemini: { id: "gemini", label: "Gemini", freeLimit: 20, period: "day", upgradable: false }, // paused — re-add to MODEL_ORDER when ready
@@ -39,7 +44,7 @@ const SUBJECTS = [
   { id: "math", label: "Mathematics", color: "#B8860B", icon: Calculator },
 ];
 
-const EXAMS = ["NEET", "JEE", "KCET"];
+const EXAMS = ["NEET", "JEE", "KCET", "Boards"];
 
 const VIVA_PURPOSES = [
   { id: "neet", label: "NEET" },
@@ -59,30 +64,6 @@ function localDateStr(date = new Date()) {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
-}
-
-// Converts formula text written with plain ^ and _ notation (e.g. "v^2", "v_rms",
-// "a_n = a·r^(n-1)") into real superscript/subscript React elements, instead of showing
-// the literal caret/underscore characters.
-function renderFormula(text) {
-  const parts = [];
-  const regex = /([\^_])(\([^)]+\)|[A-Za-z0-9]+)/g;
-  let lastIndex = 0;
-  let match;
-  let key = 0;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
-    const [, marker, raw] = match;
-    const content = raw.startsWith("(") ? raw.slice(1, -1) : raw;
-    if (marker === "^") {
-      parts.push(<sup key={key++} style={{ fontSize: "0.72em" }}>{content}</sup>);
-    } else {
-      parts.push(<sub key={key++} style={{ fontSize: "0.72em" }}>{content}</sub>);
-    }
-    lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return parts;
 }
 
 const BADGE_DEFS = [
@@ -174,7 +155,14 @@ function timeAgo(ts) {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
-export default function App({ user, onLogout }) {
+export default function App({ user: authUser, onLogout, onExitGuest }) {
+  const isGuest = !!authUser?.isGuest;
+  // A guest session is deliberately throwaway: nothing is written to, or read from, their
+  // Firestore profile. Every persistence path in this file is already keyed off
+  // `user?.uid`, so withholding the uid from guests switches all of it off at once —
+  // without touching a single rule that applies to signed-in users.
+  const user = isGuest ? { ...authUser, uid: null } : authUser;
+
   const [subject, setSubject] = useState("general");
   const [exam, setExam] = useState("NEET");
   const [messages, setMessages] = useState([]);
@@ -221,6 +209,13 @@ export default function App({ user, onLogout }) {
   const [badges, setBadges] = useState([]); // array of earned badge ids
   const [newBadgeToast, setNewBadgeToast] = useState(null); // badge just earned, shown briefly
   const [achievementsOpen, setAchievementsOpen] = useState(false);
+  // Guest allowance. The server (api/ask.js + api/guest-quota.js) is the authority; this is
+  // only so the prompt appears instantly instead of after a wasted round trip. It's seeded
+  // optimistically and then corrected by the X-Guest-Remaining header on every answer.
+  const [guestRemaining, setGuestRemaining] = useState(GUEST_FREE_QUESTIONS);
+  const [guestLimitOpen, setGuestLimitOpen] = useState(false);
+  const [guestGoogleBusy, setGuestGoogleBusy] = useState(false);
+  const [guestLimitError, setGuestLimitError] = useState("");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [upgradeModel, setUpgradeModel] = useState(null); // which model triggered the paywall
   const [upgradeBusy, setUpgradeBusy] = useState(false);
@@ -1078,6 +1073,57 @@ export default function App({ user, onLogout }) {
     }
   }
 
+  // The limit prompt's Google button signs in without leaving the app, so the guest turns
+  // into a real user under a mounted App — clear the guest gate the moment that happens.
+  useEffect(() => {
+    if (isGuest) return;
+    setGuestLimitOpen(false);
+    setGuestLimitError("");
+    setGuestRemaining(GUEST_FREE_QUESTIONS);
+  }, [isGuest]);
+
+  // A reload starts the client's counter at its optimistic full value, so ask the server
+  // what's actually left — a returning guest then sees the prompt straight away instead of
+  // after one wasted question.
+  useEffect(() => {
+    if (!isGuest) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/guest-quota", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+          body: JSON.stringify({ action: "status" }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && typeof data.remaining === "number") {
+          setGuestRemaining(Math.max(0, data.remaining));
+        }
+      } catch (e) {
+        console.error("Couldn't check the guest allowance:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest]);
+
+  async function handleGuestGoogleSignIn() {
+    setGuestLimitError("");
+    setGuestGoogleBusy(true);
+    try {
+      await signInWithGooglePopup();
+      // onAuthStateChanged in main.jsx swaps `user` for the real account; the effect above
+      // then closes this prompt. Their in-progress chat stays exactly where it is.
+    } catch (e) {
+      console.error("Google sign-in error:", e.code, e.message);
+      setGuestLimitError(`Google sign-in failed: ${e.code || e.message}`);
+    } finally {
+      setGuestGoogleBusy(false);
+    }
+  }
+
   function formatTimer(seconds) {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -1087,6 +1133,15 @@ export default function App({ user, onLogout }) {
   async function sendMessage(overrideQuestion, displayText) {
     const question = (overrideQuestion ?? input).trim();
     if ((!question && !attachedImage) || loading) return;
+
+    // Guests get GUEST_FREE_QUESTIONS answered questions, then the sign-in prompt. This is
+    // the fast path only — api/ask.js enforces the same limit against the anonymous ID
+    // token, so nothing here can be skipped by editing the page.
+    if (isGuest && guestRemaining <= 0) {
+      setGuestLimitError("");
+      setGuestLimitOpen(true);
+      return;
+    }
 
     const modelConfig = MODELS[selectedModel];
     const hasActiveSub = modelConfig.upgradable && subscriptions[selectedModel]?.active;
@@ -1141,7 +1196,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({
           question: question || "Please look at this image and help explain it.",
           systemPrompt,
@@ -1149,7 +1204,28 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           model: selectedModel,
         }),
       });
+
+      // Out of guest questions: show the sign-in prompt rather than an error bubble, and
+      // hand the student back what they'd just typed instead of stranding it in the thread.
+      if (response.status === 403) {
+        const data = await response.json().catch(() => ({}));
+        if (data.error === GUEST_LIMIT_CODE) {
+          setGuestRemaining(0);
+          setGuestLimitError("");
+          setGuestLimitOpen(true);
+          setMessages((prev) => prev.slice(0, -1));
+          if (overrideQuestion == null) setInput(question);
+          setAttachedImage(imageForSend);
+          return;
+        }
+      }
+
       if (!response.ok || !response.body) throw new Error("Stream failed");
+
+      // Sent only for guests, and only once the AI has actually answered — the server
+      // doesn't count a question until then, so a failed request never carries this header.
+      const remaining = response.headers.get(GUEST_REMAINING_HEADER);
+      if (remaining !== null) setGuestRemaining(Math.max(0, Number(remaining) || 0));
 
       setMessages((prev) => [...prev, { role: "assistant", topic: "", difficulty: "", body: "", subject }]);
       setLoading(false);
@@ -1475,6 +1551,13 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
   async function handleUpgrade() {
     const tier = upgradeModel; // "haiku" | "sonnet"
     if (!tier) return;
+    // A guest has no account for a subscription to attach to — send them to sign in first.
+    if (isGuest) {
+      setUpgradeOpen(false);
+      setGuestLimitError("");
+      setGuestLimitOpen(true);
+      return;
+    }
     const modelConfig = MODELS[tier];
     setUpgradeBusy(true);
     try {
@@ -3023,7 +3106,15 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
             </div>
           )}
 
-          {view === "rankpredictor" && (() => {
+          {view === "rankpredictor" && exam === "Boards" ? (
+            <div className="ibuddie-chat-card" style={{ flex: 1, background: "#FFFFFF", borderRadius: 18, border: "1px solid #E4E2DA", padding: 28, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <div style={{ margin: "auto", textAlign: "center", color: "#8C7D6B", maxWidth: 340 }}>
+                <TrendingUp size={26} color="#B8860B" style={{ marginBottom: 12 }} />
+                <div style={{ fontSize: 14.5, fontWeight: 600, color: "#2B2018", marginBottom: 6 }}>Rank Predictor isn't for Boards</div>
+                <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>Board exams don't have an all-India competitive rank the way NEET, JEE, and KCET do — switch to one of those exam modes to use this tool.</div>
+              </div>
+            </div>
+          ) : view === "rankpredictor" && (() => {
             const marks = parseFloat(rankMarksInput);
             const puc = parseFloat(rankPucInput);
             const hasValidMarks = !isNaN(marks) && marks >= 0;
@@ -3676,6 +3767,46 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 >
                   Close
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Guest limit prompt — shown once a guest's free Doubt Desk questions are gone.
+              Not dismissable by clicking away: signing in is the only way on from here. */}
+          {guestLimitOpen && isGuest && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(20,15,10,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
+              <div style={{ background: "#FFFFFF", borderRadius: 18, padding: 26, width: 360 }}>
+                <div style={{ fontSize: 17, fontWeight: 700, color: "#2B2018", marginBottom: 6 }}>{GUEST_LIMIT_TITLE}</div>
+                <div style={{ fontSize: 13.5, color: "#8C7D6B", marginBottom: 20 }}>{GUEST_LIMIT_SUBTITLE}</div>
+
+                <button
+                  onClick={handleGuestGoogleSignIn}
+                  disabled={guestGoogleBusy}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                    padding: "12px 0", borderRadius: 12, border: "1px solid #E4E2DA", background: "#FFFFFF",
+                    fontWeight: 600, fontSize: 14, color: "#2B2018", cursor: guestGoogleBusy ? "default" : "pointer", marginBottom: 10,
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 01-1.8 2.72v2.26h2.9c1.7-1.57 2.7-3.88 2.7-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.9-2.26c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.98v2.33A9 9 0 009 18z"/><path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 013.68 9c0-.59.1-1.17.27-1.7V4.97H.98A9 9 0 000 9c0 1.45.35 2.83.98 4.03l2.97-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 00.98 4.97l2.97 2.33C4.66 5.17 6.65 3.58 9 3.58z"/></svg>
+                  {guestGoogleBusy ? "Signing in…" : "Continue with Google"}
+                </button>
+
+                <button
+                  onClick={() => onExitGuest && onExitGuest()}
+                  disabled={guestGoogleBusy}
+                  style={{
+                    width: "100%", padding: "12px 0", borderRadius: 12, border: "none",
+                    background: ACCENT, color: "#fff", fontWeight: 600, fontSize: 14,
+                    cursor: guestGoogleBusy ? "default" : "pointer",
+                  }}
+                >
+                  Continue with Email
+                </button>
+
+                {guestLimitError && (
+                  <div style={{ color: "#B23B3B", fontSize: 12.5, marginTop: 12, textAlign: "center" }}>{guestLimitError}</div>
+                )}
               </div>
             </div>
           )}

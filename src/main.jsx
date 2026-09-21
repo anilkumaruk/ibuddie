@@ -11,6 +11,9 @@ import "./firebase";
 function Root() {
   const [user, setUser] = useState(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  // Which screen the login page opens on. Normally "choice"; set to "email" when a guest
+  // taps "Continue with Email" on the limit prompt, so they land on the form directly.
+  const [loginMode, setLoginMode] = useState("choice");
 
   useEffect(() => {
     // Firebase normally resolves the session almost instantly from local
@@ -26,7 +29,13 @@ function Root() {
         if (firebaseUser) {
           setUser({
             uid: firebaseUser.uid,
-            name: firebaseUser.displayName || firebaseUser.phoneNumber || firebaseUser.email || "there",
+            // isAnonymous is Firebase's own flag for a signInAnonymously() session — the
+            // single source of truth for "this is a guest", so a page reload keeps the
+            // guest a guest instead of quietly promoting them.
+            isGuest: firebaseUser.isAnonymous,
+            name: firebaseUser.isAnonymous
+              ? "Guest"
+              : firebaseUser.displayName || firebaseUser.phoneNumber || firebaseUser.email || "there",
           });
         } else {
           setUser(null);
@@ -47,10 +56,25 @@ function Root() {
   }, []);
 
   async function handleLogout() {
+    setLoginMode("choice");
     try {
       await signOut(auth);
     } catch (e) {
       console.error("Logout error:", e);
+    }
+    setUser(null);
+  }
+
+  // A guest who ran out of free questions chose "Continue with Email" on the limit prompt.
+  // End the anonymous session and open the existing login page on its email form — the
+  // email/password flow itself is untouched. (The prompt's Google button doesn't come
+  // through here: it runs the same native Google popup in place, without leaving the app.)
+  async function handleExitGuest() {
+    setLoginMode("email");
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error("Guest sign-out error:", e);
     }
     setUser(null);
   }
@@ -92,7 +116,9 @@ function Root() {
     );
   }
 
-  return user ? <App user={user} onLogout={handleLogout} /> : <Login onLogin={setUser} />;
+  return user
+    ? <App user={user} onLogout={handleLogout} onExitGuest={handleExitGuest} />
+    : <Login onLogin={setUser} initialMode={loginMode} />;
 }
 
 // App.jsx owns the actual module -> URL mapping (see VIEW_TO_PATH/SEGMENT_TO_VIEW there) and

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { PhoneOff } from "lucide-react";
 import { AvatarKeyframes, INK, PAPER } from "./AvatarWidget.jsx";
 import HologramTutor from "./HologramTutor.jsx";
+import { authHeaders } from "./apiAuth.js";
 
 const GREETINGS = {
   "en-IN": "Hey buddy! What can I help you with today?",
@@ -406,7 +407,7 @@ export default function VoiceCallModal({
   async function streamAndSpeak(question, systemPrompt, historyForRequest) {
     const response = await fetch("/api/ask", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
       body: JSON.stringify({ question, systemPrompt, model: activeModel, history: historyForRequest }),
     });
     if (!response.ok || !response.body) throw new Error("Stream failed");
@@ -526,7 +527,7 @@ export default function VoiceCallModal({
         .join("\n");
       const res = await fetch("/api/ask", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({
           question: `Here is the transcript of the viva:\n\n${transcriptText}\n\nIn 2-3 sentences, summarize how the student performed overall and name one specific topic they should review.`,
           systemPrompt: "You are an oral examiner writing a short private note to a student after their viva. Be honest, specific, and encouraging. Plain text only, no markdown.",
