@@ -7,7 +7,7 @@ import {
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
   BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma, TrendingUp, Brain,
-  Volume2, VolumeX, Loader2, Phone, Presentation,
+  Volume2, VolumeX, Loader2, Phone, Presentation, School,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { db, signInWithGooglePopup } from "./Login.jsx";
@@ -24,6 +24,8 @@ import VoiceCallModal from "./VoiceCallModal.jsx";
 import DoubtDeskBanner from "./components/DoubtDeskBanner.jsx";
 import AiLecture from "./AiLecture.jsx";
 import { renderFormula } from "./renderFormula.jsx";
+import CollegeHub from "./CollegeHub.jsx";
+import { callCollege } from "./collegeApi.js";
 
 const MODELS = {
   // gemini: { id: "gemini", label: "Gemini", freeLimit: 20, period: "day", upgradable: false }, // paused — re-add to MODEL_ORDER when ready
@@ -105,6 +107,7 @@ const NAV_ITEMS = [
   { key: "formulas", label: "Formula Bank", icon: Sigma },
   { key: "rankpredictor", label: "Rank Predictor", icon: TrendingUp },
   { key: "revision", label: "Revision Reminders", icon: Brain },
+  { key: "college", label: "My College", icon: School },
 ];
 
 // The URL is the source of truth for which module is open. Every `view` value already used
@@ -127,6 +130,7 @@ const VIEW_TO_PATH = {
   formulas: "/formula-bank",
   rankpredictor: "/rank-predictor",
   revision: "/revision-reminders",
+  college: "/my-college", // class invite links land here as /my-college?join=CODE
 };
 const SEGMENT_TO_VIEW = Object.fromEntries(
   Object.entries(VIEW_TO_PATH).map(([view, path]) => [path.slice(1), view])
@@ -235,6 +239,7 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
     const path = VIEW_TO_PATH[key];
     if (path && path !== location.pathname) navigate(path);
   }
+  const [collegeInvites, setCollegeInvites] = useState(0); // pending class invites from a teacher — shows a dot on My College
   const [mockTest, setMockTest] = useState({
     status: "setup", // "setup" | "loading" | "active" | "results"
     count: 5, questions: [], currentIndex: 0, answers: {}, timeLeft: 0, score: 0,
@@ -328,6 +333,13 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
 
   // Load (or create) this user's per-model usage + subscriptions from Firestore.
   // Gemini/Haiku reset daily; Sonnet resets monthly — each model checks its own clock.
+  useEffect(() => {
+    if (!user?.uid) return;
+    callCollege("me")
+      .then((d) => setCollegeInvites(d.invites || 0))
+      .catch(() => {}); // college features are optional — never block the student app on them
+  }, [user?.uid]);
+
   useEffect(() => {
     if (!user?.uid) return;
     const todayStr = new Date().toDateString();
@@ -1770,6 +1782,9 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               {sidebarOpen && (
                 <>
                   <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.key === "college" && collegeInvites > 0 && (
+                    <span title="You have a class invite" style={{ width: 8, height: 8, borderRadius: "50%", background: "#D9720D", flexShrink: 0 }} />
+                  )}
                   {item.key === "doubt" && (
                     <Plus size={15} color={view === item.key ? "#FFFFFF" : "var(--ibuddie-sidebar-muted)"} style={{ flexShrink: 0 }} />
                   )}
@@ -1862,7 +1877,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "voiceviva" ? "VOICE VIVA" : view === "ailecture" ? "AI LECTURE" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "voiceviva" ? "VOICE VIVA" : view === "ailecture" ? "AI LECTURE" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : view === "college" ? "MY COLLEGE" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -1910,7 +1925,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
           </div>
 
           {/* Subject cards + exam pills */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isMobile ? 8 : 2, flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: view === "college" ? "none" : "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isMobile ? 8 : 2, flexWrap: "wrap", gap: 12 }}>
             <div className="ibuddie-subjects" style={{ display: "flex", gap: isMobile ? 5 : 5 }}>
               {SUBJECTS.map((s) => (
                 <div
@@ -1946,6 +1961,8 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
               </div>
             )}
           </div>
+
+          {view === "college" && <CollegeHub isMobile={isMobile} isGuest={isGuest} onSignIn={onExitGuest} onInvitesChange={setCollegeInvites} />}
 
           {/* Chat card */}
           {view === "doubt" && (
