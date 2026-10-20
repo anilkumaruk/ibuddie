@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { School, GraduationCap, UserPlus, RefreshCw, LogOut, Loader2, Megaphone, Mail, ArrowRight } from "lucide-react";
 import { callCollege } from "./collegeApi.js";
-import { INK, TEXT, MUTED, card, input, sectionTitle, SPIN_CSS } from "./college/theme.js";
+import { INK, INK_LINE, TEXT, MUTED, card, input, sectionTitle, SPIN_CSS } from "./college/theme.js";
 import { Button, ErrorNote, AnnouncementItem } from "./college/ui.jsx";
 
 // Student-side "My College" view inside the main app: accept a teacher's invite or join
@@ -22,7 +22,7 @@ function clearJoinParam() {
 
 function InviteCard({ invite, onRespond, busy }) {
   return (
-    <div style={{ ...card, borderColor: `${INK}33` }}>
+    <div style={{ ...card, borderColor: INK_LINE }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, ...sectionTitle }}><Mail size={16} /> You're invited</div>
       <div style={{ fontSize: 14, color: TEXT, lineHeight: 1.6 }}>
         <b>{invite.collegeName}</b>{invite.city ? `, ${invite.city}` : ""} added you to <b>{invite.className || "a class"}</b>

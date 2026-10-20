@@ -1,14 +1,23 @@
 import { useState } from "react";
 import { TriangleAlert, Clock, Copy, Check, RefreshCw, X } from "lucide-react";
-import { TEXT, MUTED, BORDER, PAPER, INK, GREEN, RED, GOLD, BAR, card, fmtDate } from "./theme.js";
+import { TEXT, MUTED, BORDER, PAPER, INK, GREEN, RED, RED_SOFT, RED_LINE, GOLD, BAR, card, fmtDate } from "./theme.js";
 
 // Shared building blocks for the student "My College" page and the staff portal.
+
+export function BrandLogo({ size = 22 }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <span style={{ fontSize: size, fontWeight: 800, letterSpacing: "-0.02em", background: "linear-gradient(90deg, #F08A1C, #E8641B)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>iBuddie</span>
+      <span style={{ fontSize: 10.5, fontWeight: 700, color: MUTED, border: `1px solid ${BORDER}`, background: "#FFFFFF", borderRadius: 6, padding: "2px 7px", letterSpacing: "0.06em" }}>STAFF</span>
+    </span>
+  );
+}
 
 export function Button({ children, onClick, variant = "primary", disabled, small, type = "button", style }) {
   const styles = {
     primary: { background: INK, color: "#FFFFFF", border: `1px solid ${INK}` },
     secondary: { background: "#FFFFFF", color: TEXT, border: `1px solid ${BORDER}` },
-    danger: { background: "#FFFFFF", color: RED, border: `1px solid ${RED}44` },
+    danger: { background: "#FFFFFF", color: RED, border: `1px solid ${RED_LINE}` },
     ghost: { background: "transparent", color: MUTED, border: "1px solid transparent" },
   }[variant];
   return (
@@ -39,7 +48,7 @@ export function Field({ label, children, hint }) {
 
 export function ErrorNote({ children }) {
   if (!children) return null;
-  return <div style={{ background: "#FBEFEF", border: `1px solid ${RED}33`, color: RED, borderRadius: 10, fontSize: 12.5, padding: "9px 12px", marginBottom: 12 }}>{children}</div>;
+  return <div style={{ background: RED_SOFT, border: `1px solid ${RED_LINE}`, color: RED, borderRadius: 10, fontSize: 12.5, padding: "9px 12px", marginBottom: 12 }}>{children}</div>;
 }
 
 export function Modal({ title, onClose, children, width = 520 }) {
