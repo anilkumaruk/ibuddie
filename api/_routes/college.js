@@ -22,7 +22,7 @@ import {
 // Firestore security rules should deny all client access to these collections.
 
 const EXAMS = ["NEET", "JEE", "KCET", "PUC"];
-const MOCK_RESULTS_PER_STUDENT = 20;
+const MOCK_RESULTS_PER_STUDENT = 10; // ~1 + 10 reads per student per dashboard load — keep this small, it multiplies by class size
 const READ_CONCURRENCY = 25;
 const ANNOUNCEMENTS_SHOWN = 30;
 

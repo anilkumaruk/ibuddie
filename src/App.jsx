@@ -132,6 +132,15 @@ const VIEW_TO_PATH = {
   revision: "/revision-reminders",
   college: "/my-college", // class invite links land here as /my-college?join=CODE
 };
+// Firestore data each page needs beyond what every page loads (profile + chat history).
+// Fetched the first time one of these pages opens instead of on every app start.
+const VIEW_DATA = {
+  mocktest: ["mockTests"],
+  studyplan: ["mockTests", "studyPlan"],
+  revision: ["mockTests", "topicReviews"],
+  studywithme: ["studyPlan"],
+};
+
 const SEGMENT_TO_VIEW = Object.fromEntries(
   Object.entries(VIEW_TO_PATH).map(([view, path]) => [path.slice(1), view])
 );
@@ -249,6 +258,9 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
   const [mockTestPucYear, setMockTestPucYear] = useState("2nd"); // "1st" | "2nd" — only relevant for chapter mode
   const [mockTestHistory, setMockTestHistory] = useState([]); // real past attempts loaded from Firestore
   const [topicReviews, setTopicReviews] = useState([]); // explicit "reviewed this topic" events, resets the spacing clock
+  // Which per-page data has been asked for. Loaded the first time a page that needs it opens
+  // (see VIEW_DATA), then kept — so an app open costs ~31 Firestore reads instead of ~162.
+  const [dataWanted, setDataWanted] = useState({ mockTests: false, topicReviews: false, studyPlan: false });
   const [recallCheck, setRecallCheck] = useState(null); // { subject, topic, status: "loading"|"active"|"results", questions, currentIndex, answers, score }
   const [topicsState, setTopicsState] = useState({ status: "setup", list: [] }); // "setup" | "loading" | "results"
   const [pyqStep, setPyqStep] = useState("browse"); // "puc" | "browse" | "chapters" | "years" | "sets" | "loading" | "results"
@@ -459,10 +471,17 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
     migrateThenLoadConversations();
   }, [user?.uid]);
 
+  // Mark the data the current page needs; the loaders below run once per flag.
+  useEffect(() => {
+    const needs = VIEW_DATA[view];
+    if (!needs) return;
+    setDataWanted((w) => (needs.every((k) => w[k]) ? w : { ...w, ...Object.fromEntries(needs.map((k) => [k, true])) }));
+  }, [view]);
+
   // Loads real past mock test attempts — used both to show the student their own history
   // and to feed wrong-answer topics into weak-topic detection for the Study Plan.
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!user?.uid || !dataWanted.mockTests) return;
     async function loadMockTestHistory() {
       try {
         const q = query(collection(db, "users", user.uid, "mockTestResults"), orderBy("ts", "desc"), limit(30));
@@ -473,12 +492,12 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
       }
     }
     loadMockTestHistory();
-  }, [user?.uid]);
+  }, [user?.uid, dataWanted.mockTests]);
 
   // Loads explicit "reviewed this topic" events — these reset the spaced-repetition clock
   // for a topic when the student completes a quick recall check on it.
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!user?.uid || !dataWanted.topicReviews) return;
     async function loadTopicReviews() {
       try {
         const q = query(collection(db, "users", user.uid, "topicReviews"), orderBy("ts", "desc"), limit(100));
@@ -489,12 +508,12 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
       }
     }
     loadTopicReviews();
-  }, [user?.uid]);
+  }, [user?.uid, dataWanted.topicReviews]);
 
   // Loads any previously-generated study plan so it survives navigation/refresh — no
   // need to re-spend a generation call just from leaving the tab and coming back.
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!user?.uid || !dataWanted.studyPlan) return;
     async function loadStudyPlan() {
       try {
         const snap = await getDoc(doc(db, "users", user.uid, "studyPlan", "current"));
@@ -516,7 +535,7 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
       }
     }
     loadStudyPlan();
-  }, [user?.uid]);
+  }, [user?.uid, dataWanted.studyPlan]);
 
 
   useEffect(() => {

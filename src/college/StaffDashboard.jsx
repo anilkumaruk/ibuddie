@@ -35,7 +35,7 @@ function StatGrid({ summary }) {
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
       <StatTile label="Students" value={summary.students} />
       <StatTile label="Active this week" value={summary.active7d} hint={summary.students ? `${activePct}% of students` : null} />
-      <StatTile label="Avg mock score" value={summary.avgScorePct === null ? "—" : `${summary.avgScorePct}%`} hint="last 20 tests each" />
+      <StatTile label="Avg mock score" value={summary.avgScorePct === null ? "—" : `${summary.avgScorePct}%`} hint="last 10 tests each" />
       <StatTile label="Doubts asked" value={summary.doubts.toLocaleString("en-IN")} />
       <StatTile label="Tests taken" value={summary.tests.toLocaleString("en-IN")} />
       <StatTile label="Study hours" value={Math.round(summary.studyMinutes / 60).toLocaleString("en-IN")} hint="Study With Me" />
