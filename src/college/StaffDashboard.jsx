@@ -1,16 +1,22 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { sendPasswordResetEmail } from "firebase/auth";
 import {
-  School, Users, UserPlus, RefreshCw, ArrowLeft, TriangleAlert, Plus, Trash2, X, Loader2, Flame,
-  Download, Megaphone, Search, Mail, Pencil, CheckCircle2,
+  Users, UserPlus, ArrowLeft, TriangleAlert, Plus, Trash2, X, Loader2, Flame,
+  Download, Megaphone, Search, Mail, Pencil, CheckCircle2, MoreHorizontal, RefreshCw, School, BarChart3,
 } from "lucide-react";
 import { auth } from "../Login.jsx";
 import { callCollege } from "../collegeApi.js";
 import { summarizeGroup, parseRoster, normalizePhone, normalizeEmail, studentsToCsv, MAX_ROSTER_ROWS } from "../../lib/collegeStats.js";
-import { INK, TEXT, MUTED, BORDER, PAPER, GREEN, GOLD, EXAMS, card, input, sectionTitle, fmtDate } from "./theme.js";
+import { INK, TEXT, MUTED, BORDER, PAPER, GREEN, GOLD, EXAMS, card, panel, input, sectionTitle, fmtDate } from "./theme.js";
 import { Button, Field, ErrorNote, Modal, StatTile, BarList, StatusTag, CodeBox, AnnouncementItem } from "./ui.jsx";
+import { Sidebar, TopBar } from "./StaffChrome.jsx";
+import {
+  StatCards, TrendCard, SubjectCard, ActivityCard, AttentionCard, QuickActions,
+  ClassOverviewCard, TeacherOverviewCard, AnnouncementsCard,
+} from "./OverviewWidgets.jsx";
 
-// Staff portal dashboard (college admin + teachers). Rendered by src/staff/StaffApp.jsx.
+// Staff portal (college admin + teachers): sidebar layout with Overview, Classes, Students,
+// Teachers and Announcements pages. Rendered by src/staff/StaffApp.jsx.
 // `act` runs a mutation and reloads (alerts on error); modals call `callCollege` directly
 // so they can show errors inline, then call `reload`.
 
@@ -29,28 +35,14 @@ function slug(s) {
   return String(s || "students").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-function StatGrid({ summary }) {
-  const activePct = summary.students ? Math.round((summary.active7d / summary.students) * 100) : 0;
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-      <StatTile label="Students" value={summary.students} />
-      <StatTile label="Active this week" value={summary.active7d} hint={summary.students ? `${activePct}% of students` : null} />
-      <StatTile label="Avg mock score" value={summary.avgScorePct === null ? "—" : `${summary.avgScorePct}%`} hint="last 10 tests each" />
-      <StatTile label="Doubts asked" value={summary.doubts.toLocaleString("en-IN")} />
-      <StatTile label="Tests taken" value={summary.tests.toLocaleString("en-IN")} />
-      <StatTile label="Study hours" value={Math.round(summary.studyMinutes / 60).toLocaleString("en-IN")} hint="Study With Me" />
-    </div>
-  );
-}
-
 function InsightsRow({ summary }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
-      <div style={card}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+      <div style={panel}>
         <div style={sectionTitle}>Students by average mock score</div>
         <BarList rows={summary.scoreBands.map((b) => ({ label: b.label, value: b.count }))} unit="students" empty="No mock tests taken yet." />
       </div>
-      <div style={card}>
+      <div style={panel}>
         <div style={sectionTitle}>Topics most students get wrong</div>
         <BarList rows={summary.weakTopics.map((t) => ({ label: t.topic, value: t.count }))} unit="students" empty="Weak topics appear once students take mock tests." />
       </div>
@@ -58,25 +50,22 @@ function InsightsRow({ summary }) {
   );
 }
 
-function AttentionList({ summary, classNameById, onOpenStudent }) {
+function PageHeader({ title, subtitle, actions, onBack }) {
   return (
-    <div style={card}>
-      <div style={sectionTitle}>Needs attention ({summary.needsAttention.length})</div>
-      {summary.needsAttention.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: MUTED }}>Everyone is active and scoring above 40%.</div>
-      ) : (
-        summary.needsAttention.slice(0, 12).map((s) => (
-          <div key={s.uid} onClick={() => onOpenStudent(s.uid)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${BORDER}`, cursor: "pointer" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
-              <div style={{ fontSize: 11.5, color: MUTED }}>{classNameById[s.classId] || "No class"}{s.avgScorePct !== null ? ` · avg ${s.avgScorePct}%` : ""}</div>
-            </div>
-            <StatusTag status={s.status} daysInactive={s.daysInactive} />
-          </div>
-        ))
-      )}
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+      {onBack && <Button small variant="secondary" onClick={onBack} style={{ alignSelf: "center" }}><ArrowLeft size={13} /> Back</Button>}
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ fontSize: 26, fontWeight: 800, color: TEXT, letterSpacing: "-0.01em" }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 14, color: MUTED, marginTop: 2 }}>{subtitle}</div>}
+      </div>
+      {actions && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{actions}</div>}
     </div>
   );
+}
+
+function greeting(now = new Date()) {
+  const h = now.getHours();
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
 const STUDENT_COLUMNS = [
@@ -228,7 +217,10 @@ function StudentPanel({ student, classes, act, onClose }) {
   );
 }
 
-function AddStudentsModal({ cls, onClose, reload }) {
+// Opened from a class page (cls given) or from the overview (pick the class here).
+function AddStudentsModal({ cls: fixedClass, classes, onClose, reload, onCreateClass }) {
+  const [classId, setClassId] = useState(fixedClass?.id || classes[0]?.id || "");
+  const cls = fixedClass || classes.find((c) => c.id === classId);
   const [mode, setMode] = useState("one"); // "one" | "list"
   const [one, setOne] = useState({ name: "", contact: "", rollNo: "" });
   const [text, setText] = useState("");
@@ -284,8 +276,24 @@ function AddStudentsModal({ cls, onClose, reload }) {
     );
   }
 
+  if (!cls) {
+    return (
+      <Modal title="Add students" onClose={onClose}>
+        <div style={{ fontSize: 13.5, color: TEXT, lineHeight: 1.6, marginBottom: 14 }}>Students are added to a class. Create your first class, then add students to it.</div>
+        <Button onClick={onCreateClass}><Plus size={14} /> Create a class</Button>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal title={`Add students to ${cls.name}`} onClose={onClose} width={600}>
+    <Modal title={fixedClass ? `Add students to ${cls.name}` : "Add students"} onClose={onClose} width={600}>
+      {!fixedClass && (
+        <Field label="Class">
+          <select value={classId} onChange={(e) => setClassId(e.target.value)} style={input}>
+            {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+      )}
       <div style={{ display: "flex", gap: 4, background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 3, marginBottom: 14, width: "fit-content" }}>
         {[["one", "One student"], ["list", "Paste a list"]].map(([key, label]) => (
           <div key={key} onClick={() => setMode(key)} style={{ padding: "6px 14px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer", background: mode === key ? INK : "transparent", color: mode === key ? "#FFFFFF" : MUTED }}>{label}</div>
@@ -535,9 +543,9 @@ function ClassDetail({ cls, data, isAdmin, act, onBack, onOpenStudent, openModal
         shareText="Students open iBuddie → My College → Join with a code, or tap the invite link."
         onRegenerate={() => { if (window.confirm("Make a new code? The old one stops working; students already in the class stay.")) act("regenerateCode", { target: cls.id }); }}
       />
-      <StatGrid summary={summary} />
+      <StatCards summary={summary} students={students} />
       <InsightsRow summary={summary} />
-      <div style={card}>
+      <div style={panel}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
           <div style={{ ...sectionTitle, marginBottom: 0, flex: 1 }}>Students ({students.length})</div>
           {students.length > 0 && <Button small variant="secondary" onClick={() => downloadCsv(`${slug(cls.name)}-report.csv`, studentsToCsv(students, classNameById))}><Download size={13} /> Export CSV</Button>}
@@ -546,7 +554,7 @@ function ClassDetail({ cls, data, isAdmin, act, onBack, onOpenStudent, openModal
       </div>
       <PendingInvites invites={invites} act={act} />
       {announcements.length > 0 && (
-        <div style={card}>
+        <div style={panel}>
           <div style={{ ...sectionTitle, marginBottom: 4 }}>Announcements to this class</div>
           {announcements.map((a) => <AnnouncementItem key={a.id} a={a} onDelete={a.canDelete ? () => act("deleteAnnouncement", { id: a.id }) : null} />)}
         </div>
@@ -555,18 +563,18 @@ function ClassDetail({ cls, data, isAdmin, act, onBack, onOpenStudent, openModal
   );
 }
 
-function AllStudents({ data, classNameById, onOpenStudent }) {
+function AllStudents({ data, classNameById, onOpenStudent, initialStatus = "" }) {
   const [q, setQ] = useState("");
   const [classFilter, setClassFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
   const query = q.trim().toLowerCase();
   const filtered = data.students.filter((s) =>
     (!query || s.name.toLowerCase().includes(query) || (s.rollNo || "").toLowerCase().includes(query)) &&
     (!classFilter || (classFilter === "none" ? !classNameById[s.classId] : s.classId === classFilter)) &&
-    (!statusFilter || s.status === statusFilter)
+    (!statusFilter || (statusFilter === "attention" ? s.status !== "ok" : s.status === statusFilter))
   );
   return (
-    <div style={card}>
+    <div style={panel}>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ position: "relative", flex: "2 1 200px" }}>
           <Search size={14} color={MUTED} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
@@ -579,6 +587,7 @@ function AllStudents({ data, classNameById, onOpenStudent }) {
         </select>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...input, flex: "1 1 140px", width: "auto" }}>
           <option value="">Any status</option>
+          <option value="attention">Needs attention</option>
           <option value="ok">On track</option>
           <option value="struggling">Low scores</option>
           <option value="inactive">Inactive</option>
@@ -598,13 +607,41 @@ function AllStudents({ data, classNameById, onOpenStudent }) {
   );
 }
 
-export default function StaffDashboard({ data, act, reload, isMobile }) {
+function MoreMenu({ items }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <Button variant="secondary" onClick={() => setOpen((v) => !v)}><MoreHorizontal size={15} /> More</Button>
+      {open && (
+        <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", width: 220, background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 14, boxShadow: "0 12px 32px rgba(20,16,60,0.14)", padding: 6, zIndex: 30 }}>
+          {items.map((it) => (
+            <button key={it.label} disabled={it.disabled} onClick={() => { setOpen(false); it.onClick(); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 12px", border: "none", background: "transparent", borderRadius: 10, cursor: it.disabled ? "default" : "pointer", opacity: it.disabled ? 0.5 : 1, fontSize: 13, color: TEXT, textAlign: "left", fontFamily: "inherit" }}>
+              <it.icon size={15} color={INK} /> {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function StaffDashboard({ data, act, reload, isMobile, busy, user, onSignOut }) {
   const isAdmin = data.role === "admin";
-  const [tab, setTab] = useState("overview");
+  const [page, setPage] = useState("overview");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [openClassId, setOpenClassId] = useState(null);
   const [openStudentUid, setOpenStudentUid] = useState(null);
   const [creating, setCreating] = useState(false);
-  const [modal, setModal] = useState(null); // { type: "addStudents", cls } | { type: "announce", classId } | { type: "addTeacher" }
+  const [studentFilter, setStudentFilter] = useState({ status: "", n: 0 }); // n remounts the list so a preset applies
+  const [modal, setModal] = useState(null); // { type: "addStudents", cls? } | { type: "announce", classId? } | { type: "addTeacher" }
+  const mainRef = useRef(null);
 
   const summary = summarizeGroup(data.students);
   const teachers = data.teachers || [];
@@ -612,125 +649,170 @@ export default function StaffDashboard({ data, act, reload, isMobile }) {
   const openClass = data.classes.find((c) => c.id === openClassId);
   const openStudent = data.students.find((s) => s.uid === openStudentUid);
   const invitesByClass = data.invites.reduce((acc, i) => ({ ...acc, [i.classId]: (acc[i.classId] || 0) + 1 }), {});
-  const tabs = [
-    ["overview", "Overview"],
-    ["classes", isAdmin ? "Classes" : "My classes"],
-    ["students", "Students"],
-    ...(isAdmin ? [["teachers", "Teachers"]] : []),
-    ["announcements", "Announcements"],
+  const firstName = (data.me?.name || user.displayName || "").split(" ")[0] || "there";
+
+  function go(next) {
+    setPage(next);
+    setOpenClassId(null);
+    setCreating(false);
+    mainRef.current?.scrollTo?.(0, 0);
+    window.scrollTo(0, 0);
+  }
+  const openClassPage = (id) => { go("classes"); setOpenClassId(id); };
+  const startCreateClass = () => { setModal(null); go("classes"); setCreating(true); };
+  const showAttention = () => { go("students"); setStudentFilter((f) => ({ status: "attention", n: f.n + 1 })); };
+  const exportAll = () => downloadCsv(`${slug(data.college.name)}-students.csv`, studentsToCsv(data.students, classNameById));
+
+  function onSearchPick(r) {
+    if (r.kind === "student") setOpenStudentUid(r.id);
+    else if (r.kind === "class") openClassPage(r.id);
+    else go("teachers");
+  }
+
+  const quickActions = [
+    { label: "Add Student", icon: UserPlus, onClick: () => setModal({ type: "addStudents" }) },
+    { label: "Create Class", icon: School, onClick: startCreateClass },
+    isAdmin
+      ? { label: "Add Teacher", icon: Users, onClick: () => setModal({ type: "addTeacher" }) }
+      : { label: "View Students", icon: Users, onClick: () => go("students") },
+    { label: "Post Announcement", icon: Megaphone, onClick: () => setModal({ type: "announce" }), disabled: !isAdmin && data.classes.length === 0 },
+    { label: "Export Report", icon: Download, onClick: exportAll, disabled: data.students.length === 0 },
+    { label: "Needs Attention", icon: BarChart3, onClick: showAttention },
   ];
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 1100, margin: "0 auto", width: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <School size={isMobile ? 22 : 28} color={INK} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 800, color: TEXT }}>{data.college.name}</div>
-          <div style={{ fontSize: 12.5, color: MUTED }}>{[data.college.city, isAdmin ? "College admin" : "Teacher"].filter(Boolean).join(" · ")}</div>
+  let content;
+  if (page === "overview") {
+    content = (
+      <>
+        <PageHeader
+          title={<>{greeting()}, {firstName}! <span role="img" aria-label="wave">👋</span></>}
+          subtitle={`Here's what's happening at ${data.college.name} this week.`}
+          actions={
+            <>
+              <Button onClick={() => setModal({ type: "addStudents" })}><Plus size={15} /> Add Student</Button>
+              {!isMobile && <Button variant="secondary" onClick={startCreateClass}><Plus size={15} /> Create Class</Button>}
+              {isAdmin && !isMobile && <Button variant="secondary" onClick={() => setModal({ type: "addTeacher" })}><Plus size={15} /> Add Teacher</Button>}
+              <MoreMenu items={[
+                ...(isMobile ? [{ label: "Create class", icon: School, onClick: startCreateClass }] : []),
+                ...(isMobile && isAdmin ? [{ label: "Add teacher", icon: Users, onClick: () => setModal({ type: "addTeacher" }) }] : []),
+                { label: "Post announcement", icon: Megaphone, onClick: () => setModal({ type: "announce" }), disabled: !isAdmin && data.classes.length === 0 },
+                { label: "Export students (CSV)", icon: Download, onClick: exportAll, disabled: data.students.length === 0 },
+                { label: "Refresh data", icon: RefreshCw, onClick: reload },
+              ]} />
+            </>
+          }
+        />
+        {isAdmin && data.unassignedStudents > 0 && (
+          <div onClick={() => go("students")} style={{ ...card, padding: "10px 14px", fontSize: 13, color: GOLD, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+            <TriangleAlert size={15} /> {data.unassignedStudents} student(s) aren't in any class — open Students and filter by "No class" to move them.
+          </div>
+        )}
+        <StatCards summary={summary} students={data.students} />
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.55fr) minmax(0, 1fr)", gap: 16 }}>
+          <TrendCard students={data.students} classes={data.classes} />
+          <SubjectCard students={data.students} classes={data.classes} />
         </div>
-        <Button small variant="secondary" onClick={reload}><RefreshCw size={13} /> Refresh</Button>
-      </div>
-
-      {!openClass && (
-        <div style={{ display: "flex", gap: 2, borderBottom: `1px solid ${BORDER}`, overflowX: "auto" }}>
-          {tabs.map(([key, label]) => (
-            <div key={key} onClick={() => setTab(key)} style={{
-              padding: "8px 14px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", marginBottom: -1, whiteSpace: "nowrap",
-              color: tab === key ? TEXT : MUTED, borderBottom: `2px solid ${tab === key ? INK : "transparent"}`,
-            }}>{label}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
+          <ActivityCard data={data} classNameById={classNameById} onOpenStudent={setOpenStudentUid} />
+          <AttentionCard summary={summary} classNameById={classNameById} onOpenStudent={setOpenStudentUid} onViewAll={showAttention} />
+          <QuickActions actions={quickActions} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
+          <ClassOverviewCard classes={data.classes} onOpenClass={openClassPage} onViewAll={() => go("classes")} onCreate={startCreateClass} />
+          {isAdmin && <TeacherOverviewCard teachers={teachers} onViewAll={() => go("teachers")} />}
+          <AnnouncementsCard announcements={data.announcements} classNameById={classNameById} onNew={() => setModal({ type: "announce" })} onViewAll={() => go("announcements")} />
+        </div>
+      </>
+    );
+  } else if (page === "classes" && openClass) {
+    content = (
+      <ClassDetail
+        cls={openClass}
+        data={data}
+        isAdmin={isAdmin}
+        act={act}
+        onBack={() => setOpenClassId(null)}
+        onOpenStudent={setOpenStudentUid}
+        openModal={setModal}
+        classNameById={classNameById}
+      />
+    );
+  } else if (page === "classes") {
+    content = (
+      <>
+        <PageHeader
+          title={isAdmin ? "Classes" : "My Classes"}
+          subtitle="Each class has a join code students use in the iBuddie app."
+          actions={!creating && <Button onClick={() => setCreating(true)}><Plus size={15} /> New class</Button>}
+        />
+        {creating && (
+          <CreateClassForm
+            teachers={teachers}
+            isAdmin={isAdmin}
+            onCancel={() => setCreating(false)}
+            onCreate={async (payload) => { if (await act("createClass", payload)) setCreating(false); }}
+          />
+        )}
+        {data.classes.length === 0 ? (
+          <div style={{ ...panel, fontSize: 13.5, color: MUTED }}>No classes yet. Create one for each section, then add students or share its code.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+            {data.classes.map((c) => <ClassCard key={c.id} cls={c} pendingInvites={invitesByClass[c.id] || 0} onOpen={() => setOpenClassId(c.id)} />)}
+          </div>
+        )}
+      </>
+    );
+  } else if (page === "students") {
+    content = (
+      <>
+        <PageHeader
+          title="Students"
+          subtitle={`${data.students.length} student${data.students.length === 1 ? "" : "s"}${data.invites.length ? ` · ${data.invites.length} invite${data.invites.length === 1 ? "" : "s"} pending` : ""}`}
+          actions={<Button onClick={() => setModal({ type: "addStudents" })}><UserPlus size={15} /> Add Student</Button>}
+        />
+        <AllStudents key={studentFilter.n} data={data} classNameById={classNameById} onOpenStudent={setOpenStudentUid} initialStatus={studentFilter.status} />
+      </>
+    );
+  } else if (page === "teachers" && isAdmin) {
+    content = (
+      <>
+        <PageHeader title="Teachers" subtitle="Staff who can manage classes in the portal." actions={<Button onClick={() => setModal({ type: "addTeacher" })}><UserPlus size={15} /> Add Teacher</Button>} />
+        <div style={panel}>
+          {teachers.map((t, i) => (
+            <div key={t.uid} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderTop: i ? `1px solid ${BORDER}` : "none", flexWrap: "wrap" }}>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#E8F7EE", color: "#15803D", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, flexShrink: 0 }}>{t.name[0]?.toUpperCase()}</div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>{t.name} {t.role === "admin" && <span style={{ fontSize: 10.5, fontWeight: 700, color: "#A15C07", background: "#FFF3DD", borderRadius: 999, padding: "1px 7px", marginLeft: 4 }}>Admin</span>}</div>
+                <div style={{ fontSize: 12.5, color: MUTED }}>{[t.email, t.classes.length ? t.classes.join(", ") : "No classes yet"].filter(Boolean).join(" · ")}</div>
+              </div>
+              {t.role !== "admin" && (
+                <Button small variant="danger" onClick={() => { if (window.confirm(`Remove ${t.name}? Their classes stay but become unassigned.`)) act("removeMember", { uid: t.uid }); }}>
+                  <Trash2 size={13} /> Remove
+                </Button>
+              )}
+            </div>
           ))}
         </div>
-      )}
-
-      {openClass ? (
-        <ClassDetail
-          cls={openClass}
-          data={data}
-          isAdmin={isAdmin}
-          act={act}
-          onBack={() => setOpenClassId(null)}
-          onOpenStudent={setOpenStudentUid}
-          openModal={setModal}
-          classNameById={classNameById}
+        <CodeBox
+          label="OR SHARE THE TEACHER CODE"
+          code={data.college.teacherCode}
+          linkBase="/staff/"
+          shareText="Teachers sign up at the staff portal and enter this code. Share only with staff."
+          onRegenerate={() => { if (window.confirm("Make a new teacher code? The old one stops working.")) act("regenerateCode", { target: "teacher" }); }}
         />
-      ) : tab === "overview" ? (
-        <>
-          {data.classes.length === 0 && (
-            <div style={{ ...card, fontSize: 13.5, color: TEXT, lineHeight: 1.6 }}>
-              <b>Get started:</b> {isAdmin ? "add your teachers from the Teachers tab, then create a class for each section and add students." : "create a class, then add students or share its code with them."}
-              <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Button small onClick={() => { setTab("classes"); setCreating(true); }}><Plus size={13} /> Create a class</Button>
-                {isAdmin && <Button small variant="secondary" onClick={() => setModal({ type: "addTeacher" })}><UserPlus size={13} /> Add a teacher</Button>}
-              </div>
-            </div>
-          )}
-          <StatGrid summary={summary} />
-          {isAdmin && data.unassignedStudents > 0 && (
-            <div style={{ fontSize: 12.5, color: GOLD }}>{data.unassignedStudents} student(s) aren't in any class — find them under Students → "No class" and move them.</div>
-          )}
-          <InsightsRow summary={summary} />
-          <AttentionList summary={summary} classNameById={classNameById} onOpenStudent={setOpenStudentUid} />
-        </>
-      ) : tab === "classes" ? (
-        <>
-          {creating ? (
-            <CreateClassForm
-              teachers={teachers}
-              isAdmin={isAdmin}
-              onCancel={() => setCreating(false)}
-              onCreate={async (payload) => { if (await act("createClass", payload)) setCreating(false); }}
-            />
-          ) : (
-            <div><Button small onClick={() => setCreating(true)}><Plus size={13} /> New class</Button></div>
-          )}
-          {data.classes.length === 0 ? (
-            <div style={{ fontSize: 13, color: MUTED }}>No classes yet.</div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 12 }}>
-              {data.classes.map((c) => <ClassCard key={c.id} cls={c} pendingInvites={invitesByClass[c.id] || 0} onOpen={() => setOpenClassId(c.id)} />)}
-            </div>
-          )}
-        </>
-      ) : tab === "students" ? (
-        <AllStudents data={data} classNameById={classNameById} onOpenStudent={setOpenStudentUid} />
-      ) : tab === "teachers" ? (
-        <>
-          <div style={card}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-              <div style={{ ...sectionTitle, marginBottom: 0, flex: 1 }}><Users size={15} style={{ verticalAlign: -2, marginRight: 6 }} />Staff ({teachers.length})</div>
-              <Button small onClick={() => setModal({ type: "addTeacher" })}><UserPlus size={13} /> Add teacher</Button>
-            </div>
-            {teachers.map((t) => (
-              <div key={t.uid} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: `1px solid ${BORDER}`, flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 160 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: TEXT }}>{t.name} {t.role === "admin" && <span style={{ fontSize: 11, color: GOLD }}>· Admin</span>}</div>
-                  <div style={{ fontSize: 12, color: MUTED }}>{[t.email, t.classes.length ? t.classes.join(", ") : "No classes yet"].filter(Boolean).join(" · ")}</div>
-                </div>
-                {t.role !== "admin" && (
-                  <Button small variant="danger" onClick={() => { if (window.confirm(`Remove ${t.name}? Their classes stay but become unassigned.`)) act("removeMember", { uid: t.uid }); }}>
-                    <Trash2 size={13} /> Remove
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-          <CodeBox
-            label="OR SHARE THE TEACHER CODE"
-            code={data.college.teacherCode}
-            linkBase="/staff/"
-            shareText="Teachers sign up at the staff portal and enter this code. Share only with staff."
-            onRegenerate={() => { if (window.confirm("Make a new teacher code? The old one stops working.")) act("regenerateCode", { target: "teacher" }); }}
-          />
-        </>
-      ) : (
-        <div style={card}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-            <div style={{ ...sectionTitle, marginBottom: 0, flex: 1 }}>Announcements</div>
-            <Button small disabled={!isAdmin && data.classes.length === 0} onClick={() => setModal({ type: "announce" })}><Megaphone size={13} /> New announcement</Button>
-          </div>
-          <div style={{ fontSize: 12, color: MUTED, marginBottom: 6 }}>Students see these under My College in the iBuddie app.</div>
+      </>
+    );
+  } else {
+    content = (
+      <>
+        <PageHeader
+          title="Announcements"
+          subtitle="Students see these under My College in the iBuddie app."
+          actions={<Button disabled={!isAdmin && data.classes.length === 0} onClick={() => setModal({ type: "announce" })}><Megaphone size={15} /> New announcement</Button>}
+        />
+        <div style={panel}>
           {data.announcements.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: MUTED, paddingTop: 8 }}>Nothing posted yet.</div>
+            <div style={{ fontSize: 13, color: MUTED }}>Nothing posted yet.</div>
           ) : data.announcements.map((a) => (
             <AnnouncementItem
               key={a.id}
@@ -740,12 +822,35 @@ export default function StaffDashboard({ data, act, reload, isMobile }) {
             />
           ))}
         </div>
-      )}
+      </>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: "var(--ib-page, #F7F7FB)" }}>
+      <Sidebar data={data} page={page} onNavigate={go} open={menuOpen} onClose={() => setMenuOpen(false)} isMobile={isMobile} />
+      <div ref={mainRef} style={{ flex: 1, minWidth: 0 }}>
+        <TopBar
+          data={data}
+          user={user}
+          isMobile={isMobile}
+          onOpenMenu={() => setMenuOpen(true)}
+          onSearchPick={onSearchPick}
+          onRefresh={reload}
+          onSignOut={onSignOut}
+          attentionCount={summary.needsAttention.length}
+          onAttention={showAttention}
+          onInvites={() => go("classes")}
+        />
+        <main style={{ padding: isMobile ? "18px 12px 40px" : "28px 28px 48px", display: "flex", flexDirection: "column", gap: 18, maxWidth: 1400, opacity: busy ? 0.7 : 1, transition: "opacity 0.15s" }}>
+          {content}
+        </main>
+      </div>
 
       {openStudent && (
         <StudentPanel key={openStudent.uid + openStudent.name + openStudent.rollNo} student={openStudent} classes={data.classes} act={act} onClose={() => setOpenStudentUid(null)} />
       )}
-      {modal?.type === "addStudents" && <AddStudentsModal cls={modal.cls} onClose={() => setModal(null)} reload={reload} />}
+      {modal?.type === "addStudents" && <AddStudentsModal cls={modal.cls} classes={data.classes} onClose={() => setModal(null)} reload={reload} onCreateClass={startCreateClass} />}
       {modal?.type === "addTeacher" && <AddTeacherModal onClose={() => setModal(null)} reload={reload} />}
       {modal?.type === "announce" && (
         <AnnouncementModal classes={data.classes} isAdmin={isAdmin} defaultClassId={modal.classId} onClose={() => setModal(null)} reload={reload} />
@@ -753,4 +858,3 @@ export default function StaffDashboard({ data, act, reload, isMobile }) {
     </div>
   );
 }
-

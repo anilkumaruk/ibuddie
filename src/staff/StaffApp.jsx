@@ -7,8 +7,8 @@ import { School, Building2, KeyRound, LogOut, Loader2, RefreshCw, ArrowRight } f
 import { auth } from "../Login.jsx";
 import { callCollege } from "../collegeApi.js";
 import StaffDashboard from "../college/StaffDashboard.jsx";
-import { INK, TEXT, MUTED, BORDER, PAPER, GREEN, card, input, sectionTitle, SPIN_CSS } from "../college/theme.js";
-import { Button, Field, ErrorNote } from "../college/ui.jsx";
+import { INK, TEXT, MUTED, BORDER, GREEN, card, input, sectionTitle, SPIN_CSS, STAFF_THEME_CSS } from "../college/theme.js";
+import { Button, Field, ErrorNote, BrandLogo } from "../college/ui.jsx";
 
 // Staff portal (/staff/): its own sign-in for college admins and teachers, then the
 // management dashboard. Roles are checked server-side by /api/college on every call —
@@ -16,10 +16,11 @@ import { Button, Field, ErrorNote } from "../college/ui.jsx";
 
 const BASE_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-  html, body { margin: 0; background: ${PAPER}; color: ${TEXT}; font-family: 'Inter', system-ui, sans-serif; color-scheme: light; }
+  ${STAFF_THEME_CSS}
+  html, body { margin: 0; background: var(--ib-page); color: ${TEXT}; font-family: 'Inter', system-ui, sans-serif; color-scheme: light; }
   * { box-sizing: border-box; }
   button, input, select, textarea { font-family: inherit; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid ${INK}22; border-color: ${INK}55; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--ib-ink-soft); border-color: var(--ib-ink-line); }
   ${SPIN_CSS}
 `;
 
@@ -37,15 +38,6 @@ const AUTH_ERRORS = {
 
 function authMessage(e) {
   return AUTH_ERRORS[e?.code] || e?.message || "Something went wrong. Please try again.";
-}
-
-function Logo({ size = 22 }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      <span style={{ fontSize: size, fontWeight: 800, color: INK }}>i<span style={{ color: "#B8860B" }}>Buddie</span></span>
-      <span style={{ fontSize: 11, fontWeight: 700, color: MUTED, border: `1px solid ${BORDER}`, background: "#FFFFFF", borderRadius: 999, padding: "2px 8px", letterSpacing: "0.04em" }}>STAFF</span>
-    </span>
-  );
 }
 
 function CenterCard({ children, width = 400 }) {
@@ -105,7 +97,7 @@ function StaffLogin() {
   return (
     <CenterCard>
       <div style={{ textAlign: "center", marginBottom: 18 }}>
-        <Logo size={26} />
+        <BrandLogo size={26} />
         <div style={{ fontSize: 13.5, color: MUTED, marginTop: 10, lineHeight: 1.5 }}>For college admins and teachers. Students sign in at <a href="/" style={{ color: TEXT }}>{window.location.host}</a>.</div>
       </div>
       <div style={{ ...card, padding: 24 }}>
@@ -216,17 +208,6 @@ function StaffOnboarding({ user, onDone }) {
   );
 }
 
-function TopBar({ user }) {
-  return (
-    <div style={{ background: "#FFFFFF", borderBottom: `1px solid ${BORDER}`, padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 20 }}>
-      <Logo />
-      <div style={{ flex: 1 }} />
-      <span style={{ fontSize: 12.5, color: MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "40vw" }}>{user.displayName || user.email}</span>
-      <Button small variant="secondary" onClick={() => signOut(auth)}><LogOut size={13} /> Sign out</Button>
-    </div>
-  );
-}
-
 export default function StaffApp() {
   const [user, setUser] = useState(undefined); // undefined = still checking the session
   const [data, setData] = useState(null);
@@ -310,14 +291,7 @@ export default function StaffApp() {
       </CenterCard>
     );
   } else {
-    page = (
-      <>
-        <TopBar user={user} />
-        <div style={{ padding: isMobile ? "14px 12px 32px" : "22px 24px 40px", opacity: busy ? 0.7 : 1, transition: "opacity 0.15s" }}>
-          <StaffDashboard data={data} act={act} reload={load} isMobile={isMobile} />
-        </div>
-      </>
-    );
+    page = <StaffDashboard data={data} act={act} reload={load} isMobile={isMobile} busy={busy} user={user} onSignOut={() => signOut(auth)} />;
   }
 
   return (
