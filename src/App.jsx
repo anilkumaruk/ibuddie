@@ -6,7 +6,7 @@ import {
   Paperclip, Camera, Send, PlayCircle, Crown,
   ChevronDown, Copy, Check,
   ChevronLeft, ChevronRight, Plus, MessageSquare, Menu,
-  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma, TrendingUp, Brain,
+  BookMarked, Timer, CheckCircle2, XCircle, RotateCcw, FileQuestion, Target, Flame, Award, Sparkles, HelpCircle, Search, Sigma, TrendingUp, Brain, Zap,
   Volume2, VolumeX, Loader2, Phone, Presentation, School,
 } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, deleteDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
@@ -25,6 +25,7 @@ import DoubtDeskBanner from "./components/DoubtDeskBanner.jsx";
 import AiLecture from "./AiLecture.jsx";
 import { renderFormula } from "./renderFormula.jsx";
 import CollegeHub from "./CollegeHub.jsx";
+import Tricks from "./Tricks.jsx";
 import { callCollege } from "./collegeApi.js";
 
 const MODELS = {
@@ -105,6 +106,7 @@ const NAV_ITEMS = [
   { key: "pyq", label: "PYQ Bank", icon: FileQuestion },
   { key: "studyplan", label: "Study Plan", icon: Target },
   { key: "formulas", label: "Formula Bank", icon: Sigma },
+  { key: "tricks", label: "Tricks & Shortcuts", icon: Zap },
   { key: "rankpredictor", label: "Rank Predictor", icon: TrendingUp },
   { key: "revision", label: "Revision Reminders", icon: Brain },
   { key: "college", label: "My College", icon: School },
@@ -128,6 +130,7 @@ const VIEW_TO_PATH = {
   pyq: "/pyq-bank",
   studyplan: "/study-plan",
   formulas: "/formula-bank",
+  tricks: "/tricks",
   rankpredictor: "/rank-predictor",
   revision: "/revision-reminders",
   college: "/my-college", // class invite links land here as /my-college?join=CODE
@@ -248,6 +251,7 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
     const path = VIEW_TO_PATH[key];
     if (path && path !== location.pathname) navigate(path);
   }
+  const [trickSeed, setTrickSeed] = useState(null); // { text, n } — question handed from Doubt Desk to Tricks
   const [collegeInvites, setCollegeInvites] = useState(0); // pending class invites from a teacher — shows a dot on My College
   const [mockTest, setMockTest] = useState({
     status: "setup", // "setup" | "loading" | "active" | "results"
@@ -1161,17 +1165,15 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
     return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
-  async function sendMessage(overrideQuestion, displayText) {
-    const question = (overrideQuestion ?? input).trim();
-    if ((!question && !attachedImage) || loading) return;
-
-    // Guests get GUEST_FREE_QUESTIONS answered questions, then the sign-in prompt. This is
-    // the fast path only — api/ask.js enforces the same limit against the anonymous ID
-    // token, so nothing here can be skipped by editing the page.
+  // Shared by Doubt Desk and Tricks before any /api/ask call. Guests get GUEST_FREE_QUESTIONS
+  // answered questions, then the sign-in prompt — this is the fast path only; api/ask.js
+  // enforces the same limit against the anonymous ID token, so nothing here can be skipped
+  // by editing the page. Signed-in users are held to their model's free allowance.
+  function checkAskAllowance() {
     if (isGuest && guestRemaining <= 0) {
       setGuestLimitError("");
       setGuestLimitOpen(true);
-      return;
+      return { allowed: false };
     }
 
     const modelConfig = MODELS[selectedModel];
@@ -1186,8 +1188,67 @@ export default function App({ user: authUser, onLogout, onExitGuest }) {
       } else {
         alert(`You've used all ${modelConfig.freeLimit} free ${modelConfig.label} doubts for ${periodLabel}. Try again later, or switch models.`);
       }
-      return;
+      return { allowed: false };
     }
+    return { allowed: true, hasActiveSub };
+  }
+
+  // Streams one /api/ask answer for the Tricks page into onText(fullText).
+  // Returns "ok", "blocked" (limit or upgrade prompt shown) or "error".
+  async function askAi(question, systemPrompt, onText) {
+    if (!checkAskAllowance().allowed) return "blocked";
+    consumeUsage();
+    try {
+      const response = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        body: JSON.stringify({ question, systemPrompt, model: selectedModel }),
+      });
+      if (response.status === 403) {
+        const data = await response.json().catch(() => ({}));
+        if (data.error === GUEST_LIMIT_CODE) {
+          setGuestRemaining(0);
+          setGuestLimitError("");
+          setGuestLimitOpen(true);
+          return "blocked";
+        }
+      }
+      if (!response.ok || !response.body) throw new Error("Stream failed");
+
+      const remaining = response.headers.get(GUEST_REMAINING_HEADER);
+      if (remaining !== null) setGuestRemaining(Math.max(0, Number(remaining) || 0));
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        fullText += decoder.decode(value, { stream: true });
+        onText(fullText);
+      }
+      recordActivity("doubt");
+      return "ok";
+    } catch (e) {
+      console.error("Trick finder failed:", e);
+      return "error";
+    }
+  }
+
+  // "⚡ Shortcut" on a Doubt Desk answer: open Tricks with that question ready to go.
+  function showShortcut(assistantIndex) {
+    const originalQuestion = messages[assistantIndex - 1]?.content;
+    if (!originalQuestion) return;
+    setTrickSeed({ text: originalQuestion, n: Date.now() });
+    setView("tricks");
+  }
+
+  async function sendMessage(overrideQuestion, displayText) {
+    const question = (overrideQuestion ?? input).trim();
+    if ((!question && !attachedImage) || loading) return;
+
+    const { allowed, hasActiveSub } = checkAskAllowance();
+    if (!allowed) return;
 
     setInput("");
     const imageForSend = attachedImage;
@@ -1896,7 +1957,7 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 <Menu size={12} color="#2B2018" style={{ cursor: "pointer" }} onClick={() => setSidebarOpen(true)} />
               )}
               <span style={{ fontSize: isMobile ? 7 : 12, fontWeight: 600, color: "#8C7D6B", letterSpacing: "0.04em" }}>
-                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "voiceviva" ? "VOICE VIVA" : view === "ailecture" ? "AI LECTURE" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : view === "college" ? "MY COLLEGE" : "IMPORTANT TOPICS"}
+                AI MENTOR · {view === "doubt" ? "DOUBT DESK" : view === "studywithme" ? "STUDY WITH ME" : view === "voiceviva" ? "VOICE VIVA" : view === "ailecture" ? "AI LECTURE" : view === "mocktest" ? "DAILY MOCK TEST" : view === "pyq" ? "PYQ BANK" : view === "studyplan" ? "STUDY PLAN" : view === "formulas" ? "FORMULA BANK" : view === "tricks" ? "TRICKS & SHORTCUTS" : view === "rankpredictor" ? "RANK PREDICTOR" : view === "revision" ? "REVISION REMINDERS" : view === "college" ? "MY COLLEGE" : "IMPORTANT TOPICS"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, position: "relative" }}>
@@ -2096,6 +2157,16 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                           >
                             <HelpCircle size={13} />
                             <span>Still confused?</span>
+                          </div>
+                        )}
+                        {m.body && messages[i - 1]?.content && (
+                          <div
+                            onClick={() => showShortcut(i)}
+                            title="Find a faster trick for this question"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "4px 6px", borderRadius: 6, cursor: "pointer", color: "#8C7D6B", fontSize: 11.5 }}
+                          >
+                            <Zap size={13} />
+                            <span>Shortcut</span>
                           </div>
                         )}
                       </div>
@@ -3071,6 +3142,17 @@ DIFFICULTY: <Easy, Medium, or Hard for ${exam}>
                 </div>
               )}
             </div>
+          )}
+
+          {view === "tricks" && (
+            <Tricks
+              subjectLabel={currentSubject.label}
+              exam={exam}
+              isMobile={isMobile}
+              uid={user?.uid || null}
+              askAi={askAi}
+              seedQuestion={trickSeed}
+            />
           )}
 
           {view === "formulas" && (
