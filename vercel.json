@@ -1,5 +1,12 @@
 {
   "rewrites": [
-    { "source": "/((?!api/|@|src/|node_modules/|.*\\..*).*)", "destination": "/index.html" }
+    {
+      "source": "/api/:route",
+      "destination": "/api/router?route=:route"
+    },
+    {
+      "source": "/((?!api/|@|src/|node_modules/|.*\\..*).*)",
+      "destination": "/index.html"
+    }
   ]
 }

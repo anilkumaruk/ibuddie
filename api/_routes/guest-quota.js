@@ -7,14 +7,14 @@
 //
 // Signed-in (Google / Email / Phone) users are verified and waved straight through — their
 // per-model free limits are unchanged and are still handled in the app itself.
-import { adminAuth, adminDb } from "../lib/firebaseadmin.js";
+import { adminAuth, adminDb } from "../../lib/firebaseadmin.js";
 import {
   GUEST_FREE_QUESTIONS,
   readBearerToken,
   isAnonymousToken,
   guestQuota,
   consumeGuestQuestion,
-} from "../lib/guestQuota.js";
+} from "../../lib/guestQuota.js";
 
 // Both actions are safe to expose to the browser: "status" only reads, and "consume" only
 // ever moves the count up. There is deliberately no action that lowers it — that would let

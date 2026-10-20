@@ -1,7 +1,7 @@
-import { adminDb } from "../lib/firebaseadmin.js";
-import { slugify, synthesizeAndUpload } from "../lib/voiceService.js";
-import { lectureStoragePrefix } from "../lib/lectureCache.js";
-import { getPlaybackUrl } from "../lib/storage.js";
+import { adminDb } from "../../lib/firebaseadmin.js";
+import { slugify, synthesizeAndUpload } from "../../lib/voiceService.js";
+import { lectureStoragePrefix } from "../../lib/lectureCache.js";
+import { getPlaybackUrl } from "../../lib/storage.js";
 
 // Ask iBuddie and Explain Again don't need Sonnet's power: the hard part (writing accurate
 // lecture material) already happened at Sonnet during generation. Rephrasing/answering

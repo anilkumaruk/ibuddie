@@ -1,4 +1,4 @@
-import { adminAuth } from "../lib/firebaseadmin.js";
+import { adminAuth } from "../../lib/firebaseadmin.js";
 
 // Verifies the OTP with 2Factor.in, then mints a Firebase custom token so the
 // client can sign in through the normal Firebase Auth SDK (signInWithCustomToken).

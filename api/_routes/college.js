@@ -1,8 +1,8 @@
-import { adminDb, adminAuth } from "../lib/firebaseadmin.js";
+import { adminDb, adminAuth } from "../../lib/firebaseadmin.js";
 import {
   generateCode, normalizeCode, normalizePhone, normalizeEmail, inviteKey, MAX_ROSTER_ROWS,
   summarizeStudent, summarizeGroup,
-} from "../lib/collegeStats.js";
+} from "../../lib/collegeStats.js";
 
 // College / teacher dashboards. One function with an `action` field (keeps the Vercel
 // function count down). Roles live ONLY in server-written collections — never on

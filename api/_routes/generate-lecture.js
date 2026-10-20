@@ -1,10 +1,10 @@
 // Was runtime: "edge" — switched to Node.js because Firestore access (adminDb, via
 // firebase-admin) requires Node built-ins that Edge's runtime doesn't provide.
-export const config = { maxDuration: 60 };
+// Served through api/router.js, whose maxDuration (300s) applies — a full lecture takes 90-150s.
 
-import { adminDb } from "../lib/firebaseadmin.js";
-import { lectureCacheKey } from "../lib/lectureCache.js";
-import { getPlaybackUrl } from "../lib/storage.js";
+import { adminDb } from "../../lib/firebaseadmin.js";
+import { lectureCacheKey } from "../../lib/lectureCache.js";
+import { getPlaybackUrl } from "../../lib/storage.js";
 
 // Only diagram types with a matching React/SVG template in src/LectureDiagrams.jsx may be
 // requested — the model picks a TYPE + PARAMS, our code renders it, never an AI-generated
