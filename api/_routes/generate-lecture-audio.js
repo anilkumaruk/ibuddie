@@ -1,7 +1,7 @@
-import { adminDb } from "../lib/firebaseadmin.js";
-import { synthesizeAndUpload } from "../lib/voiceService.js";
-import { lectureCacheKey, lectureStoragePrefix } from "../lib/lectureCache.js";
-import { getPlaybackUrl } from "../lib/storage.js";
+import { adminDb } from "../../lib/firebaseadmin.js";
+import { synthesizeAndUpload } from "../../lib/voiceService.js";
+import { lectureCacheKey, lectureStoragePrefix } from "../../lib/lectureCache.js";
+import { getPlaybackUrl } from "../../lib/storage.js";
 
 // Segments are processed with bounded concurrency instead of strictly serial,
 // because vercel dev's own internal proxy (undici, bundled in @vercel/node)

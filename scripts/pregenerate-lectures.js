@@ -55,9 +55,9 @@ function loadEnvLocal() {
 loadEnvLocal();
 
 import { adminDb } from "../lib/firebaseadmin.js";
-import { generateLectureScript } from "../api/generate-lecture.js";
-import { synthesizeLecture } from "../api/generate-lecture-audio.js";
-import { explainSegment, EXPLAIN_STYLE_KEYS } from "../api/explain-segment.js";
+import { generateLectureScript } from "../api/_routes/generate-lecture.js";
+import { synthesizeLecture } from "../api/_routes/generate-lecture-audio.js";
+import { explainSegment, EXPLAIN_STYLE_KEYS } from "../api/_routes/explain-segment.js";
 import { lectureCacheKey } from "../lib/lectureCache.js";
 import { PUC_SYLLABUS } from "../src/data/pucSyllabus.js";
 

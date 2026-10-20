@@ -1,4 +1,4 @@
-import { adminDb } from "../lib/firebaseadmin.js";
+import { adminDb } from "../../lib/firebaseadmin.js";
 
 // Read-only catalog of which subject+exam topics already have a pre-generated lecture in
 // Firestore. This is a single Firestore query — it never touches Anthropic or the voice

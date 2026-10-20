@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { adminDb } from "../lib/firebaseAdmin.js";
+import { adminDb } from "../lib/firebaseadmin.js";
 
 // Razorpay signs the RAW body, so we can't let Vercel's default JSON body-parser
 // touch it first — it needs to match byte-for-byte or the signature check fails.
